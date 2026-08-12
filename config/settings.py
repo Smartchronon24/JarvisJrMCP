@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # OLLAMA_MODEL = "gpt-oss:120b-cloud"
 
 # Active preset ↓
-OLLAMA_HOST  =  None                          
+OLLAMA_HOST  =  None                  #"http://ollama-llama.ai-s1.sloopstash.stg"         
 OLLAMA_MODEL =  "gpt-oss:120b-cloud"     #  "llama3.2:3b"     
 OLLAMA_STREAM = True  # Set False to wait for full response before printing
 
@@ -56,6 +56,11 @@ Memory MCP Rules:
 - If you need information from memory, retrieve it using the appropriate MCP tool first.
 - If the tool returns no matching information, say that the information was not found.
 - Do not construct a fictional answer from assumptions.
+- Preserve historical values when the user explicitly changes,
+renames, replaces, or updates an existing fact and the previous
+value may be useful for future questions.
+
+Do not preserve every transient value.
 
 General rules:
 - For general knowledge questions answer directly without tools.
