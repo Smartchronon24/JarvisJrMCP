@@ -4,14 +4,29 @@ Jarvis MCP Test Harness
 A reusable interactive CLI that connects to one or more MCP servers,
 discovers their tools dynamically, and uses Ollama as the reasoning layer.
 
-To add a new MCP server later, just add an entry to MCP_SERVERS below.
+To add a new MCP server later, just add an entry to MCP_SERVERS in config/settings.py.
 """
 
 import asyncio
 import json
 import os
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
+
+# Ensure UTF-8 output on Windows so unicode characters in banners work correctly.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# Load .env file if present (e.g. UBER_CLIENT_ID etc.) before settings are imported.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — rely on shell environment variables
+
 from ollama import Client
 import ollama
 from mcp import ClientSession, StdioServerParameters
@@ -168,6 +183,28 @@ class JarvisAgent:
             print(f"  [MCP] Result  : {error_msg}")
             return error_msg
         # -------------------------
+
+        # --- Booking Safety Guard -----------------------------------------------
+        # uber_request_ride must NEVER fire automatically based on LLM inference.
+        # This gate runs in Python regardless of what the LLM decided.
+        if real_tool_name == "uber_request_ride":
+            print("\n" + "!" * 60)
+            print("  [SAFETY] The LLM wants to call uber_request_ride.")
+            print(f"  [SAFETY] Arguments: {json.dumps(arguments, indent=2)}")
+            print("!" * 60)
+            try:
+                answer = input(
+                    "\n  >>> Type YES (all caps) to confirm the ride request, "
+                    "or anything else to cancel: "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer != "YES":
+                print("  [SAFETY] Ride request CANCELLED by user.")
+                return "[Booking cancelled] The user did not confirm the ride request."
+            print("  [SAFETY] User confirmed. Proceeding with uber_request_ride.\n")
+        # ------------------------------------------------------------------------
+
         session = self.sessions.get(server_name)
         if session is None:
             return f"[Error] Server '{server_name}' is not connected."

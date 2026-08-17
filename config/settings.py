@@ -26,15 +26,24 @@ MCP_SERVERS = {
         "args": ["-y", "@modelcontextprotocol/server-memory"],
         "env": {
             **os.environ,
-            "MEMORY_FILE_PATH": str(BASE_DIR / "data" / "memory.jsonl"),
+            "MEMORY_FILE_PATH": str(BASE_DIR / "data" / "MemoryMCP" / "memory.jsonl"),
         },
     },
-    # Example: add more servers later like this:
-    # "filesystem": {
-    #     "command": "npx.cmd",
-    #     "args": ["-y", "@modelcontextprotocol/server-filesystem", str(BASE_DIR)],
-    #     "env": {**os.environ},
-    # },
+    "uber": {
+        "command": "npx.cmd",
+        # mcp-uber (199-mcp/mcp-uber) — OAuth 2.0 + Uber REST API, no browser automation
+        "args": ["-y", "mcp-uber"],
+        "env": {
+            **os.environ,
+            # Credentials are read from environment variables.
+            # Set these in a .env file (see .env.example) or in your shell.
+            # NEVER hardcode credentials here.
+            "UBER_CLIENT_ID":     os.environ.get("UBER_CLIENT_ID", ""),
+            "UBER_CLIENT_SECRET": os.environ.get("UBER_CLIENT_SECRET", ""),
+            "UBER_REDIRECT_URI":  os.environ.get("UBER_REDIRECT_URI", "http://localhost:3000/callback"),
+            "UBER_ENVIRONMENT":   os.environ.get("UBER_ENVIRONMENT", "sandbox"),
+        },
+    },
 }
 
 SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant.
@@ -61,6 +70,19 @@ renames, replaces, or updates an existing fact and the previous
 value may be useful for future questions.
 
 Do not preserve every transient value.
+
+Uber MCP Rules:
+- All Uber tools require a 'userId' argument — use 'jarvis' as the default userId.
+- uber_get_price_estimates requires numeric latitude/longitude coordinates, not place names.
+  If the user provides a place name, ask them for coordinates or tell them the lat/lng
+  needed. Do NOT invent coordinates.
+- Before calling any authenticated Uber tool (estimates, ride request, status, cancel),
+  check whether the user has set an access token. If not, call uber_get_auth_url first.
+- NEVER call uber_request_ride without explicit user confirmation. The application will
+  enforce a confirmation gate before the ride request executes.
+- Report Uber API responses exactly as returned. Do not embellish or invent ride results.
+- If an Uber tool returns an error, report the exact error text to the user.
+- Uber sandbox mode is active: ride requests may return synthetic data.
 
 General rules:
 - For general knowledge questions answer directly without tools.

@@ -4,4 +4,10 @@
 /data
 /__pycache__
 /config/__pycache__/
+/node_modules/
 
+
+# Environment / secrets — never commit real credentials
+.env*
+*.env
+*.json
