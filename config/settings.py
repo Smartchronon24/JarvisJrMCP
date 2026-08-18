@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Active preset ↓
 OLLAMA_HOST  =  None                  #"http://ollama-llama.ai-s1.sloopstash.stg"         
-OLLAMA_MODEL =  "gpt-oss:120b-cloud"     #  "llama3.2:3b"     
+OLLAMA_MODEL =  "gpt-oss:120b-cloud"     #  "gpt-oss:120b-cloud"     
 OLLAMA_STREAM = True  # Set False to wait for full response before printing
 
 MCP_SERVERS = {
@@ -42,6 +42,22 @@ MCP_SERVERS = {
             "UBER_CLIENT_SECRET": os.environ.get("UBER_CLIENT_SECRET", ""),
             "UBER_REDIRECT_URI":  os.environ.get("UBER_REDIRECT_URI", "http://localhost:3000/callback"),
             "UBER_ENVIRONMENT":   os.environ.get("UBER_ENVIRONMENT", "sandbox"),
+        },
+    },
+    "filesystem": {
+        "command": "npx.cmd",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", str(BASE_DIR / "data" / "FilesystemMCP")],
+        "env": {
+            **os.environ,
+        },
+    },
+    "playwright": {
+        # Microsoft official Playwright MCP server — browser automation via accessibility snapshots
+        "command": "npx.cmd",
+        "args": ["-y", "@playwright/mcp@latest"],
+        "cwd": str(BASE_DIR / "data" / "PlaywrightMCP"),
+        "env": {
+            **os.environ,
         },
     },
 }
@@ -83,6 +99,15 @@ Uber MCP Rules:
 - Report Uber API responses exactly as returned. Do not embellish or invent ride results.
 - If an Uber tool returns an error, report the exact error text to the user.
 - Uber sandbox mode is active: ride requests may return synthetic data.
+
+Playwright MCP Rules:
+- Use Playwright MCP tools to control the browser when the user asks you to open a URL, navigate, click, type, or inspect a web page.
+- Prefer structured accessibility snapshots (playwright__browser_snapshot or similar) over screenshots to keep context window usage low.
+- Never send raw base64 image data into your response. If a screenshot is taken, describe it in text.
+- Before interacting with an element (click, type), use a snapshot to verify the element exists on the page.
+- Report the exact page title, URL, or content returned by the tool — do not invent or paraphrase web page content.
+- If a Playwright tool returns an error, report the exact error text to the user.
+- Do not navigate to harmful, adult, or non-public URLs unless the user explicitly instructs you to.
 
 General rules:
 - For general knowledge questions answer directly without tools.

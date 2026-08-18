@@ -5,9 +5,11 @@
 /__pycache__
 /config/__pycache__/
 /node_modules/
-
+.playwright-mcp/
+scratch/
 
 # Environment / secrets — never commit real credentials
 .env*
 *.env
 *.json
+*.png

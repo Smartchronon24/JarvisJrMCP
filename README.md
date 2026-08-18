@@ -1,36 +1,42 @@
-﻿# JarvisMCP
+# JarvisMCP
 
-A minimal yet powerful **Model Context Protocol (MCP)** based AI assistant built on Ollama. Jarvis can remember facts, interact with external services, and chat using large language models — all through a clean plugin-style MCP architecture.
+A minimal yet powerful **Model Context Protocol (MCP)** based AI assistant built on Ollama. Jarvis can remember facts, interact with external services, browse the web, and chat using large language models — all through a clean plugin-style MCP architecture.
 
 ---
 
-## Features
-- **Memory MCP** — Persistent graph-based store for entities, observations, and relations.
+## ✨ Features
+- **Memory MCP** — Persistent graph-based store for entities, observations, and relations. Data is saved under `data/MemoryMCP/memory.jsonl`.
 - **Uber MCP** — OAuth 2.0 + Uber REST API integration. Get price estimates, check ride status.
+- **Filesystem MCP** — Integrates official `@modelcontextprotocol/server-filesystem` mapped specifically to the sandbox directory `data/FilesystemMCP/`.
+- **Playwright MCP** — Microsoft's official `@playwright/mcp` browser automation server. Headed Chromium browser launches by default to let you observe interactions. Ephemeral snapshots, screenshots, and logs are isolated inside `data/PlaywrightMCP/`.
+- **OAuth Callback Server** — A standalone helper script (`oauth_callback_server.js`) to capture the authorization redirect on port 3000 and display the token.
+- **Booking Safety Guard** — Intercepts `uber_request_ride` and demands explicit terminal confirmation (`YES`) before executing the ride request.
 - **Tool-first architecture** — The LLM follows the exact JSON schema of each MCP tool.
 - **Configurable endpoint** — Run against local Ollama or a remote corporate server.
 - **Streaming / non-streaming** output mode.
 - **Graceful fallback** when a model does not support tools.
-- **Extensible** — Add any MCP server by editing one dict in `config/settings.py`.
 
 ---
 
-## Repository layout
+## 📁 Repository layout
 ```
 JarvisMCP/
 ├─ config/
 │   └─ settings.py            # Host, model, MCP server map, system prompt
-├─ ollama_agent.py             # Main entry point, chat loop, tool dispatch
+├─ ollama_agent.py             # Main entry point, chat loop, tool dispatch & safety gate
 ├─ oauth_callback_server.js    # Uber OAuth callback helper (run separately during auth)
 ├─ .env.example                # Environment variable template (no real credentials)
-├─ data/                       # Memory database (generated at runtime)
+├─ data/                       # Configured local data workspace directory
+│   ├─ MemoryMCP/              # Confinement folder for Memory server database
+│   ├─ FilesystemMCP/          # Sandbox directory for Filesystem server operations
+│   └─ PlaywrightMCP/          # Sandbox folder for Playwright server logs and snapshots
 ├─ .gitignore
 └─ README.md
 ```
 
 ---
 
-## Quick Start
+## ⚙️ Quick Start
 
 ### Prerequisites
 | Requirement | Version |
@@ -39,11 +45,13 @@ JarvisMCP/
 | Node.js / npm | 18+ (for npx MCP servers) |
 | Ollama | Any recent version |
 
-### 1. Install Python dependencies
+### 1. Install dependencies
+Activate your virtual environment and install requirements:
 ```powershell
 python -m venv JarvisVenv
 JarvisVenv\Scripts\activate
 pip install -r requirements.txt
+npm install dotenv
 ```
 
 ### 2. Configure environment
@@ -56,7 +64,7 @@ Edit `.env` and fill in your credentials (see Uber section below).
 Edit `config/settings.py`:
 ```python
 OLLAMA_HOST  = None              # None = localhost:11434
-OLLAMA_MODEL = "llama3.2:3b"
+OLLAMA_MODEL = "gpt-oss:120b-cloud"
 OLLAMA_STREAM = True
 ```
 
@@ -65,20 +73,19 @@ OLLAMA_STREAM = True
 JarvisVenv\Scripts\activate
 python ollama_agent.py
 ```
+You’ll see a banner listing all dynamically connected MCP servers and their discovered tools.
 
 ---
 
-## Uber MCP Integration
+## 🚗 Uber MCP OAuth Flow
 
-The Uber integration uses the open-source [199-mcp/mcp-uber](https://github.com/199-mcp/mcp-uber) server,
-which communicates with the **Uber REST API via OAuth 2.0** (no browser automation).
+The Uber integration uses the open-source [199-mcp/mcp-uber](https://github.com/199-mcp/mcp-uber) server, which communicates with the **Uber REST API via OAuth 2.0** (no browser automation).
 
 ### Uber Developer Dashboard Setup
-
-1. Go to [https://developer.uber.com/dashboard](https://developer.uber.com/dashboard)
-2. Open your app → **Auth** tab
+1. Go to [https://developer.uber.com/dashboard](https://developer.uber.com/dashboard).
+2. Open your app → **Auth** tab.
 3. Add redirect URI: `http://localhost:3000/callback`
-4. Note your **Client ID** and **Client Secret**
+4. Note your **Client ID** and **Client Secret**.
 
 ### Environment variables (`.env`)
 ```
@@ -89,92 +96,46 @@ UBER_ENVIRONMENT=sandbox
 ```
 **Never commit `.env` to Git.** It is listed in `.gitignore`.
 
-### Available Uber MCP tools
+### OAuth Verification Flow
+1. **Start Jarvis** in Terminal 1:
+   ```powershell
+   python ollama_agent.py
+   ```
+2. **Start the Callback Helper** in Terminal 2:
+   ```powershell
+   node oauth_callback_server.js
+   ```
+3. **Generate URL:** In Jarvis, type:
+   ```
+   Get an Uber auth URL for user jarvis
+   ```
+4. **Authorize:** Open the generated URL in your browser, log in, and authorize the application.
+5. **Set Token:** Copy the access token displayed on `localhost:3000/callback` and provide it to Jarvis:
+   ```
+   Set my Uber access token to <paste token here> for user jarvis
+   ```
 
-| Tool | Description | Auth required |
-|---|---|---|
-| `uber_get_auth_url` | Generate OAuth authorization URL | No |
-| `uber_set_access_token` | Store user access token in MCP session | No |
-| `uber_get_price_estimates` | Get fare estimates (requires lat/lng) | Yes |
-| `uber_request_ride` | Request a ride (protected by confirmation gate) | Yes |
-| `uber_get_ride_status` | Get ride status by request ID | Yes |
-| `uber_cancel_ride` | Cancel an active ride | Yes |
-
-### OAuth Flow
-
-The first time you want to use Uber through Jarvis, you must authenticate:
-
-**Terminal 1 — start Jarvis:**
-```powershell
-python ollama_agent.py
-```
-
-**Terminal 2 — start the OAuth callback helper:**
-```powershell
-node oauth_callback_server.js
-```
-> Requires: `npm install dotenv` in the project root (one-time setup).
-
-**In Jarvis, say:**
-```
-Get an Uber auth URL for user jarvis
-```
-Jarvis calls `uber_get_auth_url` and returns a URL. Open it in your browser, authorize the app, and Uber will redirect to `http://localhost:3000/callback`. The callback server exchanges the code and **displays your access token** on screen.
-
-**Back in Jarvis, say:**
-```
-Set my Uber access token to <paste token here> for user jarvis
-```
-Jarvis calls `uber_set_access_token`. You are now authenticated.
-
-> **Note:** The token is held in memory by the MCP server process. If you restart Jarvis, you will need to authenticate again.
-
-### Getting Price Estimates
-
-The Uber MCP requires **numeric coordinates** (latitude/longitude), not place names.
-
-Example:
-```
-Get an Uber price estimate for user jarvis from 12.8406, 80.1534 to 12.9941, 80.1709
-```
-
-| Location | Latitude | Longitude |
-|---|---|---|
-| VIT Chennai | 12.8406 | 80.1534 |
-| Chennai International Airport | 12.9941 | 80.1709 |
-| Chennai Central Station | 13.0827 | 80.2707 |
-| T Nagar | 13.0418 | 80.2341 |
-
-> Geocoding (converting place names to coordinates) is not implemented in this milestone.
-
-### Booking Safety
-
-`uber_request_ride` is protected by a hard confirmation gate in `ollama_agent.py`.
-Regardless of what the LLM decides, the Python application will pause and require
-you to type `YES` (all caps) before the tool call is dispatched. No automatic booking
-is possible.
-
-### Sandbox Mode
-
-`UBER_ENVIRONMENT=sandbox` is the default. In sandbox mode:
-- OAuth and authentication work exactly as in production.
-- `uber_get_price_estimates` may return empty results for some coordinate pairs.
-- `uber_request_ride` requires the `request` scope, which may need Uber approval.
-- **Do not switch to `production` until Uber grants production access.**
+> [!WARNING]
+> **Invalid Scope Error:** If your app's review is pending on the Uber Developer Dashboard, requesting the privileged scopes `request` and `ride_request` will return an `invalid_scope` error. For testing OAuth, you may need to restrict the requested scopes to `profile` only in the MCP server setup.
 
 ---
 
-## Adding More MCP Servers
+## 🌐 Playwright MCP Web Browsing
 
-Add a new entry to `MCP_SERVERS` in `config/settings.py`:
-```python
-"filesystem": {
-    "command": "npx.cmd",
-    "args": ["-y", "@modelcontextprotocol/server-filesystem", str(BASE_DIR)],
-    "env": {**os.environ},
-},
-```
-Jarvis discovers all tools at startup and namespaces them as `<server>__<tool>`.
+Playwright tool interaction relies on **ephemeral session references (`ref`)** generated dynamically per snapshot (e.g. `[ref=e8]` for a button).
+
+To command browser tasks:
+1. **Navigate:** Ask Jarvis to open a page: `Open https://demo.playwright.dev/todomvc`
+2. **Inspect:** Take a snapshot to see the elements: `Take a snapshot of the page`
+3. **Interact:** Click or type by specifying the reference ID shown in the snapshot hierarchy: `Click the textbox with reference e8`
+
+---
+
+## 🛠️ Sandbox & Confinement
+
+To keep your workspace clean and secure, local modifications and outputs are restricted:
+- **Filesystem MCP:** Operations are confined strictly within the project-controlled `data/FilesystemMCP/` folder. Directory traversal attempts outside this folder are denied.
+- **Playwright MCP:** Captured accessibility snapshots, console logs, and browser screenshots are isolated inside the `data/PlaywrightMCP/` directory.
 
 ---
 
@@ -182,9 +143,8 @@ Jarvis discovers all tools at startup and namespaces them as `<server>__<tool>`.
 
 1. **Coordinates required** — `uber_get_price_estimates` needs raw lat/lng values. Geocoding from place names is not yet implemented.
 2. **In-memory token** — The OAuth access token is lost when the MCP server restarts.
-3. **`request` scope** — `uber_request_ride` may require Uber production approval before it works.
-4. **Sandbox results** — Price estimates may be empty or synthetic in sandbox mode.
-5. **OAuth helper process** — The `oauth_callback_server.js` must be running on port 3000 during authentication.
+3. **Headed browser** — The Playwright browser opens visually by default for testing.
+4. **OAuth helper process** — The `oauth_callback_server.js` must be running on port 3000 during authentication.
 
 ---
 

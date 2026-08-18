@@ -127,10 +127,15 @@ class JarvisAgent:
 
         for server_name, config in MCP_SERVERS.items():
             try:
+                server_cwd = config.get("cwd")
+                if server_cwd:
+                    Path(server_cwd).mkdir(parents=True, exist_ok=True)
+
                 params = StdioServerParameters(
                     command=config["command"],
                     args=config.get("args", []),
                     env=config.get("env"),
+                    cwd=server_cwd,
                 )
                 read, write = await self._exit_stack.enter_async_context(
                     stdio_client(params)
