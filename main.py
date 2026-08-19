@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import subprocess
 import threading
@@ -65,6 +65,8 @@ def start_bridge():
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
         startupinfo=startupinfo
     )
