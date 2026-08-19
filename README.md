@@ -47,16 +47,17 @@ A Model Context Protocol (MCP) server for WhatsApp, enabling Claude to read and 
    cd whatsapp-mcp
    ```
 
-2. **Start the WhatsApp bridge**
+2. **Start the application**
+
+   The application automatically compiles (or runs) the Go WhatsApp bridge process in the background and cleans it up on shutdown. You do not need to run the bridge in a separate terminal.
+
+   From the root directory, run:
 
    ```bash
-   cd whatsapp-bridge
-   go run .
+   python main.py
    ```
 
-   On first start, the bridge prints and stores a local REST API token at
-   `whatsapp-bridge/store/.bridge-token`. Scan the QR code with WhatsApp on
-   your phone to authenticate.
+   On first start, if not already authenticated, the terminal will print a QR code. Scan the QR code with WhatsApp on your phone to link your account.
 
 3. **Configure Claude Desktop**
 
@@ -750,15 +751,11 @@ golangci-lint run
 ### Building
 
 ```bash
-# Go bridge
+# Go bridge (normally managed automatically by main.py)
 cd whatsapp-bridge
-go build -o whatsapp-bridge
+go build -o whatsapp-bridge.exe
 
-# Run the binary
-./whatsapp-bridge
-
-# During development (avoids stale binaries)
-go run .
+# The compiled binary is automatically detected and launched by Python on start.
 ```
 
 ### Releasing (Maintainers)
