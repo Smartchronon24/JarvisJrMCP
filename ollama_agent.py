@@ -405,7 +405,7 @@ def print_banner(connected: list, failed: list, tool_map: dict):
 # Main
 # ---------------------------------------------------------------------------
 
-async def main():
+async def run_agent():
     # 1. Validate Ollama before doing anything else
     if not validate_ollama():
         return
@@ -446,4 +446,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_agent())
