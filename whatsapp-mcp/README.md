@@ -626,8 +626,6 @@ CREATE TABLE calls (
 
 ## Architecture
 
-![Architecture Overview](architecture_overview.jpg)
-
 ```mermaid
 flowchart TB
     subgraph Clients["AI Clients"]

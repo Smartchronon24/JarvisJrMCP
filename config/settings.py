@@ -63,9 +63,9 @@ MCP_SERVERS = {
     "whatsapp": {
         # verygoodplugins/whatsapp-mcp — stdio Python MCP server.
         # Requires whatsapp-bridge Go process running separately.
-        "command": str(BASE_DIR.parent / "whatsapp-mcp" / "whatsapp-mcp-server" / ".venv" / "Scripts" / "python.exe"),
+        "command": str(BASE_DIR / "whatsapp-mcp" / "whatsapp-mcp-server" / ".venv" / "Scripts" / "python.exe"),
         "args": [
-            str(BASE_DIR.parent / "whatsapp-mcp" / "whatsapp-mcp-server" / "main.py"),
+            str(BASE_DIR / "whatsapp-mcp" / "whatsapp-mcp-server" / "main.py"),
         ],
         "env": {
             **os.environ,
