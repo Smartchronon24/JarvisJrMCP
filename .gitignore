@@ -10,7 +10,7 @@ scratch/
 
 
 # Environment / secrets — never commit real credentials
-.env*
+
 *.env
 *.json
 *.png

@@ -60,6 +60,14 @@ MCP_SERVERS = {
             **os.environ,
         },
     },
+    "exa": {
+        "command": "npx.cmd",
+        "args": ["-y", "exa-mcp-server"],
+        "env": {
+            **os.environ,
+            "EXA_API_KEY": os.environ.get("EXA_API_KEY", ""),
+        },
+    },
     "whatsapp": {
         # verygoodplugins/whatsapp-mcp — stdio Python MCP server.
         # Requires whatsapp-bridge Go process running separately.
@@ -129,6 +137,18 @@ WhatsApp MCP Rules:
 - Never invent WhatsApp messages or contact details. Report exactly what the tool returns.
 - If a tool fails (e.g., because the Go bridge is offline or unauthenticated), report the exact error message to the user.
 - Do NOT delete, archive, or modify WhatsApp data unless explicitly instructed and supported by the tool.
+
+Exa MCP Rules:
+- Exa is the dedicated web-search and web-research tool.
+- Use Exa when the user asks to search the web, requests current or recent information, wants to discover webpages, articles, sources, products or companies, or when answering the question requires external web information not available through another specialist MCP.
+- Prefer Exa for INFORMATION RETRIEVAL from the web.
+- Use the minimum number of Exa searches required to answer the request accurately. Do not call Exa repeatedly or in a loop.
+- Do NOT use Exa merely because a website exists. Only use it when you need to retrieve information from the web.
+- Do NOT use Exa for Uber-related queries — use the Uber MCP instead.
+- Do NOT use Exa for WhatsApp queries — use the WhatsApp MCP instead.
+- Use Playwright instead of Exa when the user needs actual browser interaction: opening a website, clicking buttons, filling forms, navigating pages, or any task that requires browser state or UI interaction.
+- Do not use Playwright as a fallback for general web research when Exa can answer the question directly.
+- Report Exa results accurately. Do not fabricate search results.
 
 General rules:
 - For general knowledge questions answer directly without tools.

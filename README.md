@@ -27,6 +27,7 @@ A Model Context Protocol (MCP) server for WhatsApp, enabling Claude to read and 
 - **Call History**: Capture incoming voice/video calls into a local SQLite table (live, 1:1 and group)
 - **Webhook Integration**: Forward incoming messages to external services
 - **Local Storage**: All messages stored locally in SQLite - only sent to Claude when you allow it
+- **Web Search (Exa)**: Perform fast, up‑to‑date web searches and fetch page content via the Exa MCP server.
 
 ## Installation
 
@@ -845,7 +846,9 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Credits & History
 
-This project is a maintained fork of [lharries/whatsapp-mcp](https://github.com/lharries/whatsapp-mcp), originally created by [Luke Harries](https://github.com/lharries).
+This project is maintained in the [Smartchronon24/JarvisJrMCP](https://github.com/Smartchronon24/JarvisJrMCP) repository.
+
+It is a maintained fork of [lharries/whatsapp-mcp](https://github.com/lharries/whatsapp-mcp), originally created by [Luke Harries](https://github.com/lharries).
 
 **Why we forked:** The original repository hasn't been updated since April 2025. We needed continued maintenance, bug fixes, and new features for production use.
 
