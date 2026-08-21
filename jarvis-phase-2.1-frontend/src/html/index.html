@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis — Personal AI Assistant</title>
+    <link rel="stylesheet" href="../css/variables.css">
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/layout.css">
+    <link rel="stylesheet" href="../css/components.css">
+    <link rel="stylesheet" href="../css/themes.css">
+</head>
+<body>
+    <!-- Application Shell -->
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="jarvis-logo">
+                    <svg viewBox="0 0 40 40" class="logo-icon">
+                        <circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="20" cy="20" r="12" fill="none" stroke="currentColor" stroke-width="1" opacity="0.6"/>
+                        <circle cx="20" cy="20" r="6" fill="currentColor" opacity="0.8"/>
+                    </svg>
+                    <span class="logo-text">JARVIS</span>
+                </div>
+                <div class="status-indicator">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">Online</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <button class="nav-item active" data-page="home">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+                    </svg>
+                    <span>Home</span>
+                </button>
+                <button class="nav-item" data-page="activity">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+                    </svg>
+                    <span>Activity</span>
+                </button>
+                <button class="nav-item" data-page="tools">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.3-6.7-2.1-2.1-5.5-2.1-7.6 0-2.1 2.1-2.1 5.5 0 7.6 1.7 1.7 4.4 2.2 6.7 1.3l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.4-.4.4-1 0-1.4z"/>
+                    </svg>
+                    <span>Tools</span>
+                </button>
+                <button class="nav-item" data-page="settings">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.64l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.22-.07.49.12.64l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.64l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.49-.12-.64l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                    </svg>
+                    <span>Settings</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="settings-btn" data-page="settings" title="Settings">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 8c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm0 9c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/>
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Page: Home -->
+            <div class="page" id="page-home" data-page="home">
+                <div class="home-container">
+                    <!-- Chat Header -->
+                    <div class="chat-header">
+                        <div class="header-left">
+                            <h1>Jarvis</h1>
+                            <div class="model-info">
+                                <span class="dot online-dot"></span>
+                                <span>Llama 2 / Local</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Conversation Area -->
+                    <div class="conversation-container">
+                        <div class="conversation" id="conversation">
+                            <!-- Empty state with suggestions -->
+                            <div class="empty-state">
+                                <div class="empty-state-icon">
+                                    <svg viewBox="0 0 60 60">
+                                        <circle cx="30" cy="30" r="28" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+                                        <circle cx="30" cy="30" r="18" fill="none" stroke="currentColor" stroke-width="1" opacity="0.2"/>
+                                        <circle cx="30" cy="30" r="8" fill="currentColor" opacity="0.15"/>
+                                    </svg>
+                                </div>
+                                <h2>Welcome to Jarvis</h2>
+                                <p>Your personal AI assistant, powered by advanced tools and reasoning.</p>
+                                <div class="suggestion-cards">
+                                    <button class="suggestion-card" data-suggestion="research">
+                                        <span class="suggestion-icon">🔍</span>
+                                        <span class="suggestion-text">Research something</span>
+                                    </button>
+                                    <button class="suggestion-card" data-suggestion="compare">
+                                        <span class="suggestion-icon">⚖️</span>
+                                        <span class="suggestion-text">Compare products</span>
+                                    </button>
+                                    <button class="suggestion-card" data-suggestion="files">
+                                        <span class="suggestion-icon">📁</span>
+                                        <span class="suggestion-text">Manage my files</span>
+                                    </button>
+                                    <button class="suggestion-card" data-suggestion="message">
+                                        <span class="suggestion-icon">💬</span>
+                                        <span class="suggestion-text">Send a message</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Message Composer -->
+                    <div class="composer-container">
+                        <div class="composer">
+                            <textarea 
+                                id="message-input" 
+                                class="composer-input" 
+                                placeholder="Ask Jarvis anything..."
+                                rows="1"
+                            ></textarea>
+                            <div class="composer-actions">
+                                <button class="composer-btn icon-btn" title="Attach file">
+                                    <svg viewBox="0 0 24 24">
+                                        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46C10.21 5.23 11.08 5 12 5c3.04 0 5.5 2.46 5.5 5.5v.5H19c2.21 0 4 1.79 4 4 0 2.05-1.53 3.76-3.56 3.97l1.07-1.07c.63-.63.63-1.65 0-2.28L12.21 4.21c-.39-.39-.39-1.02 0-1.41.39-.39 1.02-.39 1.41 0L21.64 12c.39.39.39 1.02 0 1.41-.39.39-1.02.39-1.41 0L19.35 10.04z"/>
+                                    </svg>
+                                </button>
+                                <button class="composer-btn icon-btn" title="Voice input">
+                                    <svg viewBox="0 0 24 24">
+                                        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                                        <path d="M17 16.91c-1.48 1.46-3.51 2.36-5.7 2.36-2.2 0-4.23-.9-5.7-2.36M9 18.9v2.04c3.6.46 7.4-.44 9.9-2.98v-2.04c-2.3 2.24-5.61 2.86-9.9 2.98z"/>
+                                    </svg>
+                                </button>
+                                <button class="composer-btn send-btn" id="send-btn" title="Send (Enter)">
+                                    <svg viewBox="0 0 24 24">
+                                        <path d="M16.6915026,12.4744748 L3.50612381,13.2599618 C3.19218622,13.2599618 3.03521743,13.4170592 3.03521743,13.5741566 L1.15159189,20.0151496 C0.8376543,20.8006365 0.99,21.89 1.77946707,22.52 C2.41,22.99 3.50612381,23.1 4.13399899,22.8429026 L21.714504,14.0454487 C22.6563168,13.5741566 23.1272231,12.6315722 22.9702544,11.6889879 L4.13399899,1.16112697 C3.34915502,0.9 2.40734225,1.00636533 1.77946707,1.4776575 C0.994623095,2.10604706 0.837654326,3.0486314 1.15159189,3.99701575 L3.03521743,10.4380088 C3.03521743,10.5951061 3.19218622,10.7522035 3.50612381,10.7522035 L16.6915026,11.5376905 C16.6915026,11.5376905 17.1624089,11.5376905 17.1624089,12.0089827 C17.1624089,12.4744748 16.6915026,12.4744748 16.6915026,12.4744748 Z"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="composer-hint">
+                                <span class="hint-text">Shift + Enter for new line</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Page: Activity -->
+            <div class="page" id="page-activity" data-page="activity">
+                <div class="activity-container">
+                    <div class="activity-header">
+                        <h1>Activity</h1>
+                        <p>Tool calls and execution history</p>
+                    </div>
+
+                    <div class="activity-controls">
+                        <div class="filter-group">
+                            <button class="filter-btn active" data-filter="all">All</button>
+                            <button class="filter-btn" data-filter="running">Running</button>
+                            <button class="filter-btn" data-filter="completed">Completed</button>
+                            <button class="filter-btn" data-filter="failed">Failed</button>
+                        </div>
+                        <div class="mcp-filter">
+                            <select id="mcp-select">
+                                <option value="">All MCPs</option>
+                                <option value="memory">Memory</option>
+                                <option value="filesystem">Filesystem</option>
+                                <option value="playwright">Playwright</option>
+                                <option value="exa">Exa</option>
+                                <option value="tavily">Tavily</option>
+                                <option value="firecrawl">Firecrawl</option>
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="uber">Uber</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="activity-list" id="activity-list">
+                        <!-- Tool execution cards will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Page: Tools -->
+            <div class="page" id="page-tools" data-page="tools">
+                <div class="tools-container">
+                    <div class="tools-header">
+                        <h1>Tools</h1>
+                        <p>Available MCP capabilities</p>
+                    </div>
+
+                    <div class="tools-grid" id="tools-grid">
+                        <!-- Tool cards will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Page: Settings -->
+            <div class="page" id="page-settings" data-page="settings">
+                <div class="settings-container">
+                    <div class="settings-header">
+                        <h1>Settings</h1>
+                        <p>Configure Jarvis and your preferences</p>
+                    </div>
+
+                    <div class="settings-content">
+                        <!-- General Settings -->
+                        <section class="settings-section">
+                            <h2>General</h2>
+                            <div class="settings-group">
+                                <label for="jarvis-name">Jarvis Name</label>
+                                <input type="text" id="jarvis-name" value="Jarvis" class="input-field">
+                            </div>
+                            <div class="settings-group">
+                                <label for="startup-behavior">Startup Behavior</label>
+                                <select id="startup-behavior" class="input-field">
+                                    <option value="home">Open Home</option>
+                                    <option value="last">Open Last Page</option>
+                                </select>
+                            </div>
+                            <div class="settings-group">
+                                <label>Interface Density</label>
+                                <div class="radio-group">
+                                    <label class="radio-label">
+                                        <input type="radio" name="density" value="compact" class="density-radio">
+                                        <span>Compact</span>
+                                    </label>
+                                    <label class="radio-label">
+                                        <input type="radio" name="density" value="comfortable" class="density-radio" checked>
+                                        <span>Comfortable</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Appearance Settings -->
+                        <section class="settings-section">
+                            <h2>Appearance</h2>
+                            <div class="settings-group">
+                                <label>Theme</label>
+                                <div class="radio-group">
+                                    <label class="radio-label">
+                                        <input type="radio" name="theme" value="dark" class="theme-radio" checked>
+                                        <span>Dark</span>
+                                    </label>
+                                    <label class="radio-label">
+                                        <input type="radio" name="theme" value="light" class="theme-radio">
+                                        <span>Light</span>
+                                    </label>
+                                    <label class="radio-label">
+                                        <input type="radio" name="theme" value="system" class="theme-radio">
+                                        <span>System</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                <label for="accent-color">Accent Color</label>
+                                <div class="color-picker">
+                                    <button class="color-option" data-color="#3b82f6" style="background-color: #3b82f6;" title="Blue"></button>
+                                    <button class="color-option" data-color="#10b981" style="background-color: #10b981;" title="Green"></button>
+                                    <button class="color-option" data-color="#f59e0b" style="background-color: #f59e0b;" title="Amber"></button>
+                                    <button class="color-option" data-color="#ef4444" style="background-color: #ef4444;" title="Red"></button>
+                                    <button class="color-option active" data-color="#8b5cf6" style="background-color: #8b5cf6;" title="Purple"></button>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="animations-toggle" checked>
+                                    <span>Enable animations</span>
+                                </label>
+                            </div>
+                        </section>
+
+                        <!-- MCP Capabilities -->
+                        <section class="settings-section">
+                            <h2>MCP / Capabilities</h2>
+                            <div class="mcp-toggles" id="mcp-toggles">
+                                <!-- MCP toggle switches will be inserted here -->
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="../js/mock-data.js"></script>
+    <script src="../js/state.js"></script>
+    <script src="../js/theme.js"></script>
+    <script src="../js/events.js"></script>
+    <script src="../js/chat.js"></script>
+    <script src="../js/activity.js"></script>
+    <script src="../js/tools.js"></script>
+    <script src="../js/settings.js"></script>
+    <script src="../js/app.js"></script>
+</body>
+</html>

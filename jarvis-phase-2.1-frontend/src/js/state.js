@@ -1,0 +1,179 @@
+/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\state.js */
+/**
+ * Application State Management
+ * Centralized state for messages, tool executions, settings
+ */
+
+class AppState {
+    constructor() {
+        this.messages = [...mockMessages];
+        this.toolExecutions = [...mockToolExecutions];
+        this.mcpServers = [...mockMcpServers];
+        this.settings = JSON.parse(JSON.stringify(mockSettings));
+        this.currentPage = 'home';
+        this.isStreaming = false;
+        this.listeners = [];
+    }
+
+    // Messages
+    addMessage(role, content) {
+        const message = {
+            id: this.messages.length + 1,
+            role,
+            content,
+            timestamp: new Date(),
+        };
+        this.messages.push(message);
+        this.notify('message_added', message);
+        return message;
+    }
+
+    getMessages() {
+        return this.messages;
+    }
+
+    // Tool Executions
+    addToolExecution(mcpServer, tool, arguments_) {
+        const execution = {
+            id: `exec-${Date.now()}`,
+            mcpServer,
+            tool,
+            status: 'running',
+            startTime: new Date(),
+            duration: 0,
+            arguments: arguments_,
+            result: null,
+        };
+        this.toolExecutions.unshift(execution);
+        this.notify('tool_call_started', execution);
+        return execution;
+    }
+
+    completeToolExecution(id, result) {
+        const execution = this.toolExecutions.find((e) => e.id === id);
+        if (execution) {
+            execution.status = 'completed';
+            execution.duration = new Date() - execution.startTime;
+            execution.result = result;
+            this.notify('tool_call_completed', execution);
+        }
+        return execution;
+    }
+
+    failToolExecution(id, error) {
+        const execution = this.toolExecutions.find((e) => e.id === id);
+        if (execution) {
+            execution.status = 'failed';
+            execution.duration = new Date() - execution.startTime;
+            execution.result = error;
+            this.notify('tool_call_failed', execution);
+        }
+        return execution;
+    }
+
+    getToolExecutions(filter = 'all', mcpFilter = '') {
+        let filtered = this.toolExecutions;
+
+        if (filter !== 'all') {
+            filtered = filtered.filter((e) => e.status === filter);
+        }
+
+        if (mcpFilter) {
+            filtered = filtered.filter((e) => e.mcpServer === mcpFilter);
+        }
+
+        return filtered;
+    }
+
+    // Settings
+    updateSetting(section, key, value) {
+        if (this.settings[section]) {
+            this.settings[section][key] = value;
+            this.saveSetting(section, key, value);
+            this.notify('settings_changed', { section, key, value });
+        }
+    }
+
+    getSetting(section, key) {
+        return this.settings[section]?.[key];
+    }
+
+    getSettings() {
+        return this.settings;
+    }
+
+    saveSetting(section, key, value) {
+        const key_ = `jarvis_${section}_${key}`;
+        localStorage.setItem(key_, JSON.stringify(value));
+    }
+
+    loadSettings() {
+        Object.keys(this.settings).forEach((section) => {
+            Object.keys(this.settings[section]).forEach((key) => {
+                const key_ = `jarvis_${section}_${key}`;
+                const stored = localStorage.getItem(key_);
+                if (stored) {
+                    try {
+                        this.settings[section][key] = JSON.parse(stored);
+                    } catch (e) {
+                        // Ignore parse errors
+                    }
+                }
+            });
+        });
+    }
+
+    // MCP Settings
+    toggleMcp(mcpId, enabled) {
+        this.settings.mcp[mcpId] = enabled;
+        this.saveSetting('mcp', mcpId, enabled);
+        this.notify('mcp_toggled', { mcpId, enabled });
+    }
+
+    isMcpEnabled(mcpId) {
+        return this.settings.mcp[mcpId] !== false;
+    }
+
+    // Page Navigation
+    setCurrentPage(page) {
+        this.currentPage = page;
+        this.notify('page_changed', page);
+    }
+
+    getCurrentPage() {
+        return this.currentPage;
+    }
+
+    // Streaming State
+    setStreaming(isStreaming) {
+        this.isStreaming = isStreaming;
+        this.notify('streaming_changed', isStreaming);
+    }
+
+    isStreaming_() {
+        return this.isStreaming;
+    }
+
+    // Event System
+    on(event, callback) {
+        if (!this.listeners[event]) {
+            this.listeners[event] = [];
+        }
+        this.listeners[event].push(callback);
+    }
+
+    off(event, callback) {
+        if (this.listeners[event]) {
+            this.listeners[event] = this.listeners[event].filter((cb) => cb !== callback);
+        }
+    }
+
+    notify(event, data) {
+        if (this.listeners[event]) {
+            this.listeners[event].forEach((cb) => cb(data));
+        }
+    }
+}
+
+const appState = new AppState();
+appState.loadSettings();

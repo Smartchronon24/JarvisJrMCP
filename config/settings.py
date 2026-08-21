@@ -68,6 +68,22 @@ MCP_SERVERS = {
             "EXA_API_KEY": os.environ.get("EXA_API_KEY", ""),
         },
     },
+    "tavily": {
+        "command": "npx.cmd",
+        "args": ["-y", "tavily-mcp"],
+        "env": {
+            **os.environ,
+            "TAVILY_API_KEY": os.environ.get("TAVILY_API_KEY", ""),
+        },
+    },
+    "firecrawl": {
+        "command": "npx.cmd",
+        "args": ["-y", "firecrawl-mcp"],
+        "env": {
+            **os.environ,
+            "FIRECRAWL_API_KEY": os.environ.get("FIRECRAWL_API_KEY", ""),
+        },
+    },
     "whatsapp": {
         # verygoodplugins/whatsapp-mcp — stdio Python MCP server.
         # Requires whatsapp-bridge Go process running separately.
@@ -149,6 +165,30 @@ Exa MCP Rules:
 - Use Playwright instead of Exa when the user needs actual browser interaction: opening a website, clicking buttons, filling forms, navigating pages, or any task that requires browser state or UI interaction.
 - Do not use Playwright as a fallback for general web research when Exa can answer the question directly.
 - Report Exa results accurately. Do not fabricate search results.
+
+Tavily MCP Rules:
+- Tavily is a web search and content extraction tool optimised for accurate, factual retrieval.
+- Use tavily_search when the user asks for current information, news, or research that benefits from ranked web results.
+- Use tavily_extract when the user wants to extract structured content from a specific URL or set of URLs.
+- Use tavily_crawl to recursively crawl a website and retrieve multiple pages.
+- Use tavily_map to get a full sitemap/URL list for a domain.
+- Use tavily_research for deep, multi-step research tasks that require synthesising many sources.
+- Do NOT use Tavily for Uber, WhatsApp, or tasks that other specialist MCPs handle.
+- Prefer Tavily over Exa when the user explicitly requests deep research or when structured fact-finding across many sources is needed.
+- Report Tavily results accurately. Do not fabricate search results or extracted content.
+
+Firecrawl MCP Rules:
+- Firecrawl is a web scraping and crawling tool optimised for extracting clean content from web pages.
+- Use firecrawl_scrape to extract clean markdown/text from a single URL.
+- Use firecrawl_search to run a web search and return scraped page content (not just links).
+- Use firecrawl_crawl to crawl an entire website or subtree and collect page content.
+- Use firecrawl_map to discover all URLs on a site.
+- Use firecrawl_extract to pull structured data from pages using a defined schema.
+- Prefer Firecrawl when the user needs the full readable content of a specific page or site, rather than just a web search result.
+- Prefer Exa or Tavily for general web search when full-page scraping is not required.
+- Use Playwright instead of Firecrawl when the task requires actual browser interaction (clicks, form submission, login).
+- Do NOT use Firecrawl for Uber, WhatsApp, or tasks that other specialist MCPs handle.
+- Report Firecrawl results accurately. Do not fabricate scraped content.
 
 General rules:
 - For general knowledge questions answer directly without tools.

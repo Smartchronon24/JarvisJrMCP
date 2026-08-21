@@ -1,0 +1,47 @@
+/* Theme overrides and extended styling */
+
+html[data-density="compact"] {
+    --spacing-xs: 2px;
+    --spacing-sm: 4px;
+    --spacing-md: 8px;
+    --spacing-lg: 12px;
+    --spacing-xl: 16px;
+}
+
+html[data-density="compact"] .nav-item,
+html[data-density="compact"] .settings-group {
+    padding: var(--spacing-sm) var(--spacing-md);
+    gap: var(--spacing-xs);
+}
+
+html[data-density="compact"] .message-bubble {
+    padding: var(--spacing-sm) var(--spacing-md);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* Print styles */
+@media print {
+    .sidebar,
+    .composer-container,
+    .activity-controls,
+    .nav-item,
+    .settings-btn {
+        display: none;
+    }
+
+    .main-content {
+        width: 100%;
+    }
+
+    .page {
+        display: block !important;
+    }
+}
