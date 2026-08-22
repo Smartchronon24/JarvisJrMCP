@@ -20,6 +20,10 @@ OLLAMA_HOST  =  None                  #"http://ollama-llama.ai-s1.sloopstash.stg
 OLLAMA_MODEL =  "gpt-oss:120b-cloud"     #  "gpt-oss:120b-cloud"     
 OLLAMA_STREAM = True  # Set False to wait for full response before printing
 
+# Multi-Agent Configuration
+ROUTER_MODEL = "gpt-oss:20b-cloud"
+WORKER_MODEL = OLLAMA_MODEL  # Fallback to the default model for workers
+
 MCP_SERVERS = {
     "memory": {
         "command": "npx.cmd",

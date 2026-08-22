@@ -17,6 +17,8 @@ class SettingsScreen {
         this.setupEventListeners();
         this.renderMcpToggles();
         this.loadSettings();
+
+        appState.on('mcp_status_changed', () => this.renderMcpToggles());
     }
 
     setupEventListeners() {
@@ -120,12 +122,33 @@ class SettingsScreen {
 
     setupToggleSwitches() {
         document.querySelectorAll('.toggle-switch').forEach((toggle) => {
-            toggle.addEventListener('click', () => {
+            toggle.addEventListener('click', async () => {
                 const mcpId = toggle.dataset.mcpId;
-                const enabled = toggle.classList.contains('active');
-                appState.toggleMcp(mcpId, !enabled);
+                const currentlyEnabled = toggle.classList.contains('active');
+                const newEnabled = !currentlyEnabled;
+
+                // Optimistically update UI
+                appState.toggleMcp(mcpId, newEnabled);
                 toggle.classList.toggle('active');
                 toggle.closest('.mcp-toggle-item').classList.toggle('disabled');
+
+                // Enforce on backend — backend is authoritative
+                try {
+                    const res = await fetch('/api/settings/mcp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ server_name: mcpId, enabled: newEnabled }),
+                    });
+                    if (!res.ok) {
+                        console.warn(`[MCP Policy] Backend rejected toggle for '${mcpId}':`, await res.json());
+                        // Revert UI if backend rejected
+                        appState.toggleMcp(mcpId, currentlyEnabled);
+                        toggle.classList.toggle('active');
+                        toggle.closest('.mcp-toggle-item').classList.toggle('disabled');
+                    }
+                } catch (e) {
+                    console.warn('[MCP Policy] Could not reach backend to enforce toggle:', e);
+                }
             });
         });
     }

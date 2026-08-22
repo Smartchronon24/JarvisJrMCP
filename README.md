@@ -1,106 +1,65 @@
-# WhatsApp MCP Server
+# Jarvis MCP Assistant
 
 [![CI](https://github.com/verygoodplugins/whatsapp-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/verygoodplugins/whatsapp-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Go 1.25+](https://img.shields.io/badge/go-1.25+-00ADD8.svg)](https://go.dev/)
 
-A Model Context Protocol (MCP) server for WhatsApp, enabling Claude to read and send WhatsApp messages.
+A personal AI assistant that combines Ollama reasoning, a multi-agent Router/Worker pipeline, and a configurable collection of Model Context Protocol (MCP) servers.
 
 > Originally created by [Luke Harries](https://github.com/lharries/whatsapp-mcp). Maintained by [Very Good Plugins](https://verygoodplugins.com/?utm_source=github).
+## Architecture
 
-<p align="center">
-  <a href="https://github.com/user-attachments/assets/9475af1d-2369-4315-9ccc-823dba2c5c32"><strong>Watch the WhatsApp MCP demo video</strong></a>
-</p>
+Jarvis now uses a capability-based multi-agent loop around the existing MCP clients:
 
-<p align="center">
-  <sub>Product demo generated with Remotion using simulated data.</sub>
-</p>
-
-## Features
-
-- **Message Management**: Search and read personal WhatsApp messages (text, images, videos, documents, audio)
-- **Contact Search**: Search contacts by name or phone number with `sender_display` format ("Name (phone)")
-- **Send Messages**: Send text messages to individuals or groups
-- **Read Receipts**: Explicitly mark selected messages as read across linked devices
-- **Media Support**: Send and download images, videos, documents, and voice messages
-- **Call History**: Capture incoming voice/video calls into a local SQLite table (live, 1:1 and group)
-- **Webhook Integration**: Forward incoming messages to external services
-- **Local Storage**: All messages stored locally in SQLite - only sent to Claude when you allow it
-- **Web Search (Exa)**: Perform fast, up‑to‑date web searches and fetch page content via the Exa MCP server.
-
-## Installation
-
-### Prerequisites
-
-- Go 1.25+
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Claude Desktop or Cursor
-- FFmpeg (optional, for voice message conversion)
-
-### Quick Start
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/verygoodplugins/whatsapp-mcp.git
-   cd whatsapp-mcp
-   ```
-
-2. **Start the application**
-
-   The application automatically compiles (or runs) the Go WhatsApp bridge process in the background and cleans it up on shutdown. You do not need to run the bridge in a separate terminal.
-
-   From the root directory, run:
-
-   ```bash
-   python main.py
-   ```
-
-   On first start, if not already authenticated, the terminal will print a QR code. Scan the QR code with WhatsApp on your phone to link your account.
-
-3. **Configure Claude Desktop**
-
-   Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-   ```json
-   {
-     "mcpServers": {
-       "whatsapp": {
-         "command": "uv",
-         "args": [
-           "--directory",
-           "/path/to/whatsapp-mcp/whatsapp-mcp-server",
-           "run",
-           "main.py"
-         ]
-       }
-     }
-   }
-   ```
-
-   Replace `/path/to/whatsapp-mcp` with your actual path.
-
-4. **Restart Claude Desktop**
-
-### Updating
-
-Pull the latest changes, then refresh whichever components moved:
-
-```bash
-git pull
+```mermaid
+flowchart TB
+  U[User request] --> API[Starlette server]
+  API --> R[Router]
+  R --> V[Decision validator]
+  V --> O[Orchestrator]
+  O --> P[Enabled MCP policy]
+  P --> W[Worker with resolved tools]
+  W --> M[MCP servers]
+  M --> W
+  W --> API
+  API --> UI[Browser UI via SSE]
+  R -. failure .-> F[Single-agent fallback]
+  F --> M
 ```
 
-| You changed                                                              | What to do                                                                                                                                            |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Bridge code** (`whatsapp-bridge/*.go`) and you run `go run .`          | Nothing — `go run` recompiles each launch. Just restart the bridge.                                                                                   |
-| **Bridge code** and you run a built binary                               | `cd whatsapp-bridge && go build -o whatsapp-bridge && ./whatsapp-bridge`                                                                              |
-| **MCP server** (`whatsapp-mcp-server/*.py`, `pyproject.toml`, `uv.lock`) | Restart Claude Desktop / Cursor — `uv` re-resolves from the lockfile on next launch. Force a sync with `cd whatsapp-mcp-server && uv sync` if needed. |
+### Request lifecycle
 
-Updates do **not** require re-pairing or deleting `whatsapp.db` — your session and message history are preserved. Re-pairing is only needed when explicitly requesting full history (see [Requesting full history](#requesting-full-history)).
+1. `server.py` accepts a chat request at `POST /api/chat/stream`.
+2. `Router` uses `ROUTER_MODEL` to return a JSON decision containing `task_type`, `capabilities`, `worker_instruction`, and `reason`.
+3. `validate_decision()` supplies safe defaults and removes unknown capabilities.
+4. The Orchestrator maps capabilities through `CAPABILITY_REGISTRY`, intersects the result with `enabled_mcps`, and resolves the matching Ollama tool definitions.
+5. `Worker` receives only those resolved tools and runs the tool-calling loop with `WORKER_MODEL`.
+6. If routing fails, `_fallback_stream()` runs the original single-agent loop with all currently enabled tools.
+7. Router, Worker, and tool events are streamed to the browser as SSE frames.
 
-For `v0.2.1` and later, restart both the bridge and MCP server after updating
+### MCP capability registry
+
+The registry in `multi_agent.py` currently maps capabilities to these servers:
+
+| Capability | MCP servers |
+| --- | --- |
+| `web_research` | Exa, Tavily, Firecrawl |
+| `browser_automation` | Playwright |
+| `messaging` | WhatsApp |
+| `ride_booking` | Uber |
+| `filesystem` | Filesystem |
+| `memory` | Memory |
+
+Multiple servers may satisfy one capability. The Orchestrator can therefore provide a Worker with tools from more than one MCP while still enforcing the user’s enabled-server policy.
+
+### Safety and failure boundaries
+
+- Disabled MCPs are removed from the Worker’s tool payload and blocked again in `execute_tool()`.
+- A Worker tool call outside its resolved allowlist produces a tool error instead of executing.
+- Router failures use the `ROUTER_FAILED` sentinel and preserve the legacy single-agent behavior.
+- Uber ride requests require explicit confirmation in the Python execution layer.
+- The server emits `request_error` and `request_complete` events so the UI can recover from failures without leaving a request in a loading state.
 so the MCP server can read the bridge token. If the two components do not share
 the same checkout, set the same `WHATSAPP_BRIDGE_TOKEN` value in both
 environments.

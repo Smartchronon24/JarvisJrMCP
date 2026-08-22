@@ -1,13 +1,14 @@
 /* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\chat.js */
 /**
  * Chat Interface & Messaging Logic
- * Handles user input, message display, streaming responses
+ * Handles user input, message display, real SSE streaming responses
  */
 
 class ChatInterface {
     constructor() {
         this.messageInput = document.getElementById('message-input');
         this.sendBtn = document.getElementById('send-btn');
+        this.stopBtn = document.getElementById('stop-btn');
         this.conversationContainer = document.getElementById('conversation');
         this.composerContainer = document.querySelector('.composer-container');
 
@@ -16,6 +17,15 @@ class ChatInterface {
 
         appState.on('message_added', () => this.renderConversation());
         appState.on('streaming_changed', () => this.onStreamingStateChanged());
+
+        // Stop button
+        this.stopBtn.addEventListener('click', async () => {
+            try {
+                await fetch('/api/chat/cancel', { method: 'POST' });
+            } catch (e) {
+                console.warn('Cancel request failed:', e);
+            }
+        });
     }
 
     setupEventListeners() {
@@ -58,53 +68,141 @@ class ChatInterface {
         this.messageInput.focus();
     }
 
-    sendMessage() {
+    async sendMessage() {
         const content = this.messageInput.value.trim();
-        if (!content) {
+        if (!content || appState.isStreaming) {
             return;
         }
 
-        // Add user message
+        // Add user message to UI immediately
         appState.addMessage('user', content);
         this.messageInput.value = '';
         this.messageInput.style.height = 'auto';
 
-        // Simulate assistant response with streaming
-        this.simulateAssistantResponse(content);
-    }
-
-    simulateAssistantResponse(userMessage) {
         appState.setStreaming(true);
 
-        // Add empty assistant message
+        // Add placeholder assistant message for live updates
         const assistantMsg = appState.addMessage('assistant', '');
+        this.renderConversation();
 
-        // Simulate streaming with mock data
-        const mockResponses = {
-            research: 'I\'ll search for the latest information on that topic.\n\n[Initiating Tavily search...]\n\nSearch completed. I found 5 relevant sources with recent updates. Would you like me to dive deeper into any specific aspect?',
-            compare: 'Let me gather the specifications for both graphics cards...\n\n[Running comparison analysis...]\n\nBased on current benchmarks:\n- RTX 5090: ~600W TDP, 32GB VRAM\n- RTX 4090: ~450W TDP, 24GB VRAM\n\nThe RTX 5090 offers approximately 35% better performance.',
-            files: 'Scanning your filesystem for recent changes...\n\n[Filesystem search in progress...]\n\nFound 12 files modified in the last 7 days:\n- Documents/report.pdf (2 days ago)\n- Projects/code.js (1 day ago)\n- Notes/ideas.txt (today)\n\nWould you like more details?',
-            message: 'I\'ll compose and send that message for you.\n\n[WhatsApp integration ready...]\n\nMessage queued for sending: "Hi Alex! How are you doing?"\n\nReady to send. Please confirm.',
-            default: 'I\'ve processed your request and initiated the necessary tools to help you. Let me compile the results...\n\n[Processing with multiple MCP servers...]\n\nHere\'s what I found...',
-        };
+        try {
+            await this._streamResponse(content, assistantMsg);
+        } catch (err) {
+            assistantMsg.content = `Connection error: ${err.message}`;
+            this.renderConversation();
+        } finally {
+            appState.setStreaming(false);
+        }
+    }
 
-        const response = Object.keys(mockResponses).find((key) =>
-            userMessage.toLowerCase().includes(key)
-        );
-        const mockResponse = mockResponses[response] || mockResponses.default;
+    async _streamResponse(userMessage, assistantMsg) {
+        const response = await fetch('/api/chat/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: userMessage }),
+        });
 
-        // Stream character by character
-        let index = 0;
-        const streamInterval = setInterval(() => {
-            if (index < mockResponse.length) {
-                assistantMsg.content += mockResponse[index];
-                this.renderConversation();
-                index++;
-            } else {
-                clearInterval(streamInterval);
-                appState.setStreaming(false);
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ error: 'Server error' }));
+            assistantMsg.content = `Error: ${err.error || 'Unknown server error'}`;
+            this.renderConversation();
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        // Track active tool executions by id
+        const activeToolExecs = {};
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // SSE frames are separated by double newlines (may include carriage returns on Windows/standard SSE)
+            const frames = buffer.split(/\r?\n\r?\n/);
+            buffer = frames.pop(); // keep last incomplete frame
+
+            for (const frame of frames) {
+                const line = frame.trim();
+                if (!line.startsWith('data:')) continue;
+
+                const jsonStr = line.slice(5).trim();
+                if (!jsonStr) continue;
+
+                let event;
+                try {
+                    event = JSON.parse(jsonStr);
+                } catch (e) {
+                    continue;
+                }
+
+                this._handleEvent(event, assistantMsg, activeToolExecs);
             }
-        }, 20);
+        }
+    }
+
+    _handleEvent(event, assistantMsg, activeToolExecs) {
+        switch (event.type) {
+            case 'assistant_start':
+                // Ensure placeholder is ready
+                if (!assistantMsg.content) {
+                    assistantMsg.content = '';
+                }
+                break;
+
+            case 'assistant_delta':
+                assistantMsg.content += (event.content || '');
+                this.renderConversation();
+                break;
+
+            case 'assistant_complete':
+                this.renderConversation();
+                break;
+
+            case 'tool_call_start': {
+                const exec = appState.addToolExecution(
+                    event.server,
+                    event.tool,
+                    event.arguments || {}
+                );
+                // Override the auto-generated id with the server-side one for correlation
+                exec.id = event.id;
+                activeToolExecs[event.id] = exec;
+                break;
+            }
+
+            case 'tool_call_result': {
+                const exec = activeToolExecs[event.id];
+                if (exec) {
+                    appState.completeToolExecution(exec.id, event.result);
+                }
+                break;
+            }
+
+            case 'tool_call_error': {
+                const exec = activeToolExecs[event.id];
+                if (exec) {
+                    appState.failToolExecution(exec.id, event.error);
+                }
+                break;
+            }
+
+            case 'request_error':
+                assistantMsg.content = assistantMsg.content
+                    ? assistantMsg.content + `\n\n⚠️ ${event.error}`
+                    : `⚠️ Error: ${event.error}`;
+                this.renderConversation();
+                break;
+
+            case 'request_complete':
+                // Ensure final render
+                this.renderConversation();
+                break;
+        }
     }
 
     renderConversation() {
@@ -178,7 +276,6 @@ class ChatInterface {
     }
 
     formatContent(content) {
-        // Basic markdown-like formatting
         let formatted = content
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -195,6 +292,7 @@ class ChatInterface {
     }
 
     formatTime(date) {
+        if (!date) return 'just now';
         const now = new Date();
         const diff = now - date;
         const minutes = Math.floor(diff / 60000);
@@ -212,12 +310,17 @@ class ChatInterface {
     }
 
     onStreamingStateChanged() {
-        if (appState.isStreaming_()) {
+        if (appState.isStreaming) {
             this.sendBtn.disabled = true;
+            this.sendBtn.style.display = 'none';
+            this.stopBtn.style.display = '';
             this.messageInput.disabled = true;
         } else {
             this.sendBtn.disabled = false;
+            this.sendBtn.style.display = '';
+            this.stopBtn.style.display = 'none';
             this.messageInput.disabled = false;
+            this.messageInput.focus();
         }
     }
 

@@ -6,8 +6,8 @@
 
 class AppState {
     constructor() {
-        this.messages = [...mockMessages];
-        this.toolExecutions = [...mockToolExecutions];
+        this.messages = [];
+        this.toolExecutions = [];
         this.mcpServers = [...mockMcpServers];
         this.settings = JSON.parse(JSON.stringify(mockSettings));
         this.currentPage = 'home';
@@ -173,7 +173,49 @@ class AppState {
             this.listeners[event].forEach((cb) => cb(data));
         }
     }
+
+    async loadBackendData() {
+        try {
+            // Load messages
+            const msgsRes = await fetch('/api/messages');
+            if (msgsRes.ok) {
+                const msgs = await msgsRes.json();
+                this.messages = msgs.map(m => ({
+                    ...m,
+                    timestamp: m.timestamp ? new Date(m.timestamp) : new Date()
+                }));
+                this.notify('message_added', null);
+            }
+            
+            // Load tools/MCP status
+            const statusRes = await fetch('/api/status');
+            if (statusRes.ok) {
+                const status = await statusRes.json();
+                // Map the connected MCPs and their tools
+                this.mcpServers = this.mcpServers.map(server => {
+                    const backendServer = status.mcp_servers.find(s => s.id === server.id);
+                    if (backendServer) {
+                        return {
+                            ...server,
+                            connected: true,
+                            tools: backendServer.tools
+                        };
+                    } else {
+                        return {
+                            ...server,
+                            connected: false,
+                            tools: []
+                        };
+                    }
+                });
+                this.notify('mcp_status_changed', this.mcpServers);
+            }
+        } catch (e) {
+            console.error("Failed to load initial backend data:", e);
+        }
+    }
 }
 
 const appState = new AppState();
 appState.loadSettings();
+appState.loadBackendData();

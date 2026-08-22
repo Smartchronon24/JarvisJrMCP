@@ -10,6 +10,7 @@ class ToolsScreen {
         this.renderTools();
 
         appState.on('mcp_toggled', () => this.renderTools());
+        appState.on('mcp_status_changed', () => this.renderTools());
     }
 
     renderTools() {
