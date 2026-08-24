@@ -18,6 +18,7 @@ class ActivityScreen {
         appState.on('tool_call_started', () => this.renderActivity());
         appState.on('tool_call_completed', () => this.renderActivity());
         appState.on('tool_call_failed', () => this.renderActivity());
+        appState.on('plan_created', () => this.renderActivity());
     }
 
     setupEventListeners() {
@@ -38,8 +39,9 @@ class ActivityScreen {
 
     renderActivity() {
         const executions = appState.getToolExecutions(this.currentFilter, this.currentMcpFilter);
+        const plans = appState.getWorkerPlans();
 
-        if (executions.length === 0) {
+        if (executions.length === 0 && plans.length === 0) {
             this.activityList.innerHTML = `
                 <div style="text-align: center; padding: 40px; color: var(--text-tertiary);">
                     <p>No tool executions matching your filters</p>
@@ -48,9 +50,8 @@ class ActivityScreen {
             return;
         }
 
-        this.activityList.innerHTML = executions
-            .map((exec) => this.createToolCard(exec))
-            .join('');
+        this.activityList.innerHTML = plans.map((plan) => this.createPlanCard(plan)).join('')
+            + executions.map((exec) => this.createToolCard(exec)).join('');
 
         this.setupToolCardListeners();
     }
@@ -99,6 +100,21 @@ class ActivityScreen {
                         <div class="tool-result">${this.escapeHtml(resultJson)}</div>
                     </div>
                 </div>
+            </div>
+        `;
+    }
+
+    createPlanCard(plan) {
+        const steps = plan.steps.map((step, index) => `
+            <li><span>${index + 1}.</span> ${this.escapeHtml(step)}</li>
+        `).join('');
+        return `
+            <div class="worker-plan-card">
+                <div class="worker-plan-header">
+                    <strong>Worker plan</strong>
+                    <span>Planning</span>
+                </div>
+                <ol>${steps}</ol>
             </div>
         `;
     }

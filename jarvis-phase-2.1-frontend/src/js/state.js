@@ -8,11 +8,13 @@ class AppState {
     constructor() {
         this.messages = [];
         this.toolExecutions = [];
+        this.workerPlans = [];
         this.mcpServers = [...mockMcpServers];
         this.settings = JSON.parse(JSON.stringify(mockSettings));
         this.currentPage = 'home';
         this.isStreaming = false;
         this.listeners = [];
+        this.loadActivity();
     }
 
     // Messages
@@ -45,6 +47,7 @@ class AppState {
             result: null,
         };
         this.toolExecutions.unshift(execution);
+        this.saveActivity();
         this.notify('tool_call_started', execution);
         return execution;
     }
@@ -55,6 +58,7 @@ class AppState {
             execution.status = 'completed';
             execution.duration = new Date() - execution.startTime;
             execution.result = result;
+            this.saveActivity();
             this.notify('tool_call_completed', execution);
         }
         return execution;
@@ -66,6 +70,7 @@ class AppState {
             execution.status = 'failed';
             execution.duration = new Date() - execution.startTime;
             execution.result = error;
+            this.saveActivity();
             this.notify('tool_call_failed', execution);
         }
         return execution;
@@ -83,6 +88,58 @@ class AppState {
         }
 
         return filtered;
+    }
+
+    addWorkerPlan(steps) {
+        const plan = {
+            id: `plan-${Date.now()}`,
+            steps: Array.isArray(steps) ? steps : [],
+            createdAt: new Date(),
+        };
+        this.workerPlans.unshift(plan);
+        this.saveActivity();
+        this.notify('plan_created', plan);
+        return plan;
+    }
+
+    getWorkerPlans() {
+        return this.workerPlans;
+    }
+
+    saveActivity() {
+        try {
+            sessionStorage.setItem('jarvis_activity', JSON.stringify({
+                toolExecutions: this.toolExecutions,
+                workerPlans: this.workerPlans,
+            }));
+        } catch (e) {
+            console.warn('Unable to save activity state:', e);
+        }
+    }
+
+    loadActivity() {
+        try {
+            const stored = sessionStorage.getItem('jarvis_activity');
+            if (!stored) return;
+
+            const activity = JSON.parse(stored);
+            this.toolExecutions = Array.isArray(activity.toolExecutions)
+                ? activity.toolExecutions.map((execution) => ({
+                    ...execution,
+                    startTime: new Date(execution.startTime),
+                }))
+                : [];
+            this.workerPlans = Array.isArray(activity.workerPlans)
+                ? activity.workerPlans.map((plan) => ({
+                    ...plan,
+                    createdAt: new Date(plan.createdAt),
+                }))
+                : [];
+        } catch (e) {
+            console.warn('Unable to load activity state:', e);
+            this.toolExecutions = [];
+            this.workerPlans = [];
+        }
     }
 
     // Settings

@@ -84,6 +84,23 @@ Emitted upon successful execution of an MCP tool.
 }
 ```
 
+#### 5a. `plan_created`
+Emitted when the Worker creates a concise multi-step execution plan. The
+steps are display-safe summaries and are rendered in the Activity pane. This
+event does not represent private chain-of-thought or trigger another LLM call.
+```json
+{
+  "type": "plan_created",
+  "agent": "worker",
+  "id": "worker_plan_1",
+  "steps": [
+    "Find relevant candidates",
+    "Compare candidates",
+    "Verify important details"
+  ]
+}
+```
+
 #### 6. `tool_call_error`
 Emitted if an MCP tool throws an exception during execution.
 ```json
@@ -146,6 +163,7 @@ The UI supports stopping long-running agent responses in real time.
 * **`state.js` (`AppState`)**: Centralizes messages, tool executions, MCP status, and streaming state; publishes UI events.
 * **`chat.js` (`ChatInterface`)**: Sends messages, parses SSE frames, appends assistant deltas, and maps Router/Worker/tool events into application state.
 * **`activity.js` (`ActivityScreen`)**: Displays live execution cards with source, tool, arguments, result, status, and duration.
+* **Worker plan cards**: `plan_created` events are stored by `state.js` and rendered by `activity.js` alongside tool execution cards.
 * **`settings.js` (`SettingsScreen`)**: Renders MCP switches and synchronizes their state with the settings API, including optimistic updates and rollback.
 * **`tools.js` (`ToolsScreen`)**: Lists the tools reported by connected MCP servers.
 * **`theme.js` and `events.js`**: Manage theme preferences and shared browser events.

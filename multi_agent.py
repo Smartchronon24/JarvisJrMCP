@@ -13,11 +13,22 @@ Hard Task Enforcement:
 
 import json
 import logging
+import re
+import time
 from config.settings import ROUTER_MODEL, WORKER_MODEL
 import ollama
 
 # Configure simple logging
 logger = logging.getLogger("jarvis.multi_agent")
+
+_CAPABILITY_INTENT_PATTERNS = {
+    "memory": re.compile(r"\b(?:memory|remember|recollect|recall|forget|forgot|stored|save|saved)\b", re.IGNORECASE),
+    "web_research": re.compile(r"\b(?:search|research|latest|current|recent|news|price|prices)\b", re.IGNORECASE),
+    "browser_automation": re.compile(r"\b(?:open|navigate|click|type|fill|browse|website|webpage)\b", re.IGNORECASE),
+    "messaging": re.compile(r"\b(?:whatsapp|message|contact|send)\b", re.IGNORECASE),
+    "filesystem": re.compile(r"\b(?:file|folder|directory|read|write|list)\b", re.IGNORECASE),
+    "ride_booking": re.compile(r"\b(?:uber|ride|book a ride|request a ride)\b", re.IGNORECASE),
+}
 
 # ---------------------------------------------------------------------------
 # Capability Registry (Easy 4)
@@ -57,9 +68,6 @@ CAPABILITY_REGISTRY = {
 # this and falls back to the original single-agent execution path.
 ROUTER_FAILED = {"_router_failed": True}
 
-# Required fields in a valid router decision
-_REQUIRED_FIELDS = {"task_type", "capabilities", "worker_instruction", "reason"}
-
 # ---------------------------------------------------------------------------
 # Hard 3: Decision Validator
 # ---------------------------------------------------------------------------
@@ -86,6 +94,14 @@ def validate_decision(decision: dict) -> dict:
     d = dict(decision)
     corrections = []
 
+    if d.get("action") not in ("respond", "delegate"):
+        d["action"] = "delegate"
+        corrections.append("action defaulted to 'delegate'")
+
+    if d["action"] == "respond" and not isinstance(d.get("response"), str):
+        d["action"] = "delegate"
+        corrections.append("invalid direct response changed to 'delegate'")
+
     # --- Fill missing required fields ---
     if "task_type" not in d or not isinstance(d.get("task_type"), str):
         d["task_type"] = "general_chat"
@@ -102,6 +118,10 @@ def validate_decision(decision: dict) -> dict:
     if "reason" not in d or not isinstance(d.get("reason"), str):
         d["reason"] = "(no reason provided)"
         corrections.append("reason defaulted")
+
+    if d["action"] == "respond":
+        d["capabilities"] = []
+        d["worker_instruction"] = ""
 
     # --- Strip unknown capability names (Hard 3) ---
     unknown_caps = [c for c in d["capabilities"] if c not in CAPABILITY_REGISTRY]
@@ -130,12 +150,14 @@ class Router:
             capabilities_desc += f"- {cap}: {info['description']} (MCP servers: {', '.join(info['mcps'])})\n"
 
         prompt = f"""You are the Router for Jarvis, a personal AI assistant.
-Your job is to analyze the user's message and determine the task type, the required capabilities, and build a concise instruction for the Worker.
+Your job is to either answer a simple request directly or delegate it to the Worker.
 
 Available Capabilities:
 {capabilities_desc}
 
 You MUST return a JSON object with the following fields:
+- action: Either "respond" for a simple request you can answer reliably without tools, current information, or external actions, or "delegate" for everything else.
+- response: The complete answer when action is "respond". Use an empty string when action is "delegate".
 - task_type: A short string identifying the task category (e.g., "web_research", "browser_task", "messaging_task", "ride_booking", "filesystem_task", "memory_task", or "general_chat").
 - capabilities: A JSON array of capability names from the list above only. Can be empty [] if no specialist tool is needed (e.g. for simple chat).
 - worker_instruction: A clear, actionable directive for the Worker LLM to execute. Do not include your internal planning.
@@ -143,11 +165,19 @@ You MUST return a JSON object with the following fields:
 
 STRICT RULES:
 - Only use capability names exactly as listed above. Do not invent new capability names.
-- If the user is asking a simple conversational question (no tools needed), return an empty capabilities array.
+- Use action "respond" only for greetings, casual conversation, simple factual questions, basic explanations, and other requests comfortably within your capabilities.
+- Use action "delegate" if the request needs any MCP tool, external action, web search, current or time-sensitive information, specialized or deep reasoning, multi-step execution, or if you are uncertain.
+- Any request involving Jarvis memory, including "remember me", "recollect your memory", "use your memory", recalling stored facts, or saving information, MUST use action "delegate" with capability "memory". Do not answer these from general knowledge or claim that memory is unavailable.
+- Requests involving WhatsApp, files, websites, messages, rides, or searching MUST also use action "delegate" with the matching capability.
+- Never answer a request for latest, current, recent, live, or externally verified information from model knowledge. Delegate it.
+- For action "respond", set capabilities to [], worker_instruction to "", and put only the user-facing answer in response.
+- For action "delegate", set response to "" and provide the required capability names and worker_instruction.
 - Do not output any markdown code blocks, explanations, or text outside the JSON object. Return ONLY valid JSON.
 
 Example output:
 {{
+    "action": "delegate",
+    "response": "",
   "task_type": "web_research",
   "capabilities": ["web_research"],
   "worker_instruction": "Compare current RTX 5070 listings in India and identify the best options.",
@@ -178,11 +208,30 @@ Example output:
 
         try:
             # format="json" instructs Ollama to guarantee a JSON response
+            t0 = time.time()
             response = ollama.chat(
                 model=self.model,
                 messages=messages,
                 format="json"
             )
+            duration_ms = int((time.time() - t0) * 1000)
+
+            # Extract token counts if exposed by Ollama
+            p_tokens = getattr(response, "prompt_eval_count", None)
+            c_tokens = getattr(response, "eval_count", None)
+            t_tokens = (p_tokens + c_tokens) if (p_tokens is not None and c_tokens is not None) else None
+
+            from bookkeeping import bookkeeping_service
+            bookkeeping_service.record_llm_usage(
+                model=self.model,
+                role="router",
+                success=True,
+                prompt_tokens=p_tokens,
+                completion_tokens=c_tokens,
+                total_tokens=t_tokens,
+                duration_ms=duration_ms,
+            )
+
             raw_content = response.message.content or ""
             raw_content = raw_content.strip()
 
@@ -192,16 +241,51 @@ Example output:
 
             decision = json.loads(raw_content)
             # Hard 3: validate and sanitise before returning
-            return validate_decision(decision)
+            decision = validate_decision(decision)
+            return self._enforce_capability_intent(decision, user_message)
 
         except json.JSONDecodeError as e:
             logger.error(f"Router returned invalid JSON: {e}")
+            from bookkeeping import bookkeeping_service
+            bookkeeping_service.record_llm_usage(
+                model=self.model,
+                role="router",
+                success=False,
+                error_info=f"JSONDecodeError: {e}"
+            )
             return ROUTER_FAILED
 
         except Exception as e:
             # Hard 4: Model unavailable, network error, timeout, etc.
             logger.error(f"Router failed with exception: {e}")
+            from bookkeeping import bookkeeping_service
+            bookkeeping_service.record_llm_usage(
+                model=self.model,
+                role="router",
+                success=False,
+                error_info=str(e)
+            )
             return ROUTER_FAILED
+
+    @staticmethod
+    def _enforce_capability_intent(decision: dict, user_message: str) -> dict:
+        """Prevent an overconfident direct answer from bypassing an obvious MCP request."""
+        if decision.get("action") != "respond":
+            return decision
+
+        for capability, pattern in _CAPABILITY_INTENT_PATTERNS.items():
+            if pattern.search(user_message):
+                return {
+                    **decision,
+                    "action": "delegate",
+                    "response": "",
+                    "task_type": f"{capability}_task",
+                    "capabilities": [capability],
+                    "worker_instruction": user_message,
+                    "reason": f"The request matches the {capability} capability and must be handled with its MCP tools.",
+                }
+
+        return decision
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +314,33 @@ Guidelines:
 - You have access ONLY to the tools listed below. Do not attempt to call any tool not on this list.
 - If the task cannot be completed with the available tools, say so clearly.
 - Keep your final output concise and directly address the user's objective.
+- Decide whether the task is simple enough to complete directly. Do not create a plan for a single-step task.
+- For a genuinely multi-step task, form a concise working plan before acting. Keep only the necessary steps and use it to track what remains.
+- When you create a multi-step plan, expose only its concise user-visible steps once, before acting, using exactly this format (omit it for single-step tasks):
+    <jarvis_plan>
+    1. First step
+    2. Second step
+    </jarvis_plan>
+- Execute the plan incrementally with the available tools. After each tool result, assess what it establishes, mark the relevant step complete, and adapt the remaining steps when results are missing, contradictory, or unexpected.
+- Treat tool results as evidence for subsequent steps. Do not claim a step or the overall task is complete unless the available results support it.
+- Do not reveal private chain-of-thought. If useful, communicate only a brief user-facing summary of the current step or plan.
 
 Your available tools:
 {tool_list}
 """
         return prompt
+
+    @staticmethod
+    def extract_plan(content: str) -> tuple[str, list[str]]:
+        """Extract the Worker's concise display plan without exposing the marker in chat."""
+        match = re.search(r"<jarvis_plan>\s*(.*?)\s*</jarvis_plan>", content, re.DOTALL | re.IGNORECASE)
+        if not match:
+            return content, []
+
+        steps = []
+        for line in match.group(1).splitlines():
+            step = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
+            if step:
+                steps.append(step)
+        clean_content = (content[:match.start()] + content[match.end():]).strip()
+        return clean_content, steps

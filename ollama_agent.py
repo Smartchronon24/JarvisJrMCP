@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from contextlib import AsyncExitStack
 from pathlib import Path
 
@@ -271,7 +272,46 @@ class JarvisAgent:
         print(f"  [MCP] Args    : {json.dumps(arguments, indent=2)}")
 
         try:
+            t0 = time.time()
             result = await session.call_tool(real_tool_name, arguments)
+            duration_ms = int((time.time() - t0) * 1000)
+
+            # Record provider usage for Exa, Tavily, Firecrawl
+            if server_name in ("exa", "tavily", "firecrawl"):
+                actual_count = 1
+                metadata_str = None
+                
+                # Attempt to extract actual usage from result if it's JSON structured
+                if not result.is_error and result.content:
+                    try:
+                        for item in result.content:
+                            if hasattr(item, "text"):
+                                try:
+                                    parsed = json.loads(item.text)
+                                    if isinstance(parsed, dict):
+                                        # Look for common usage fields
+                                        usage_data = parsed.get("usage") or parsed.get("metadata", {}).get("usage")
+                                        if isinstance(usage_data, dict) and "credits" in usage_data:
+                                            actual_count = int(usage_data["credits"])
+                                        elif "api_requests" in parsed:
+                                            actual_count = int(parsed["api_requests"])
+                                        metadata_str = json.dumps(parsed.get("metadata", {}))
+                                except json.JSONDecodeError:
+                                    pass
+                    except Exception:
+                        pass
+
+                from bookkeeping import bookkeeping_service
+                bookkeeping_service.record_provider_usage(
+                    provider=server_name,
+                    operation=real_tool_name,
+                    success=not result.is_error,
+                    request_count=actual_count,
+                    estimated_count=1,
+                    duration_ms=duration_ms,
+                    error_info=str(result.content) if result.is_error else None,
+                    metadata=metadata_str,
+                )
 
             # Extract a clean text result
             if result.is_error:
@@ -457,10 +497,22 @@ class JarvisAgent:
 
             self.clear_cancel()
             cancelled = False
+            t0 = time.time()
+            p_tokens, c_tokens = None, None
+
             for chunk in response:
                 if self._cancel_requested:
                     cancelled = True
                     break
+                
+                # Extract tokens from chunk if available
+                p_eval = getattr(chunk, "prompt_eval_count", None)
+                if p_eval is not None:
+                    p_tokens = p_eval
+                c_eval = getattr(chunk, "eval_count", None)
+                if c_eval is not None:
+                    c_tokens = c_eval
+
                 delta = chunk.message.content or ""
                 if delta:
                     if not emitted_assistant_start:
@@ -471,6 +523,20 @@ class JarvisAgent:
                 if chunk.message.tool_calls:
                     for tc in chunk.message.tool_calls:
                         tool_calls.append(tc)
+
+            duration_ms = int((time.time() - t0) * 1000)
+            t_tokens = (p_tokens + c_tokens) if (p_tokens is not None and c_tokens is not None) else None
+
+            from bookkeeping import bookkeeping_service
+            bookkeeping_service.record_llm_usage(
+                model=OLLAMA_MODEL,
+                role="fallback",
+                success=True,
+                prompt_tokens=p_tokens,
+                completion_tokens=c_tokens,
+                total_tokens=t_tokens,
+                duration_ms=duration_ms
+            )
 
             if cancelled:
                 reply = content.strip()
@@ -625,8 +691,9 @@ class JarvisAgent:
 
         print(f"[ROUTER] Decision:")
         print(f"        task_type: {decision.get('task_type')}")
+        print(f"        action: {decision.get('action')}")
         print(f"        capabilities: {decision.get('capabilities')}")
-        print(f"        worker_required: {decision.get('worker_required')}")
+        print(f"        response: {decision.get('response')}")
         print(f"        worker_instruction: {decision.get('worker_instruction')}")
         print(f"        reason: {decision.get('reason')}")
 
@@ -638,6 +705,17 @@ class JarvisAgent:
             "tool": "analyze_request",
             "result": decision
         }
+
+        if decision.get("action") == "respond":
+            response_text = decision["response"]
+            print("[ROUTER] Decision: direct_response")
+            self.conversation.append({"role": "assistant", "content": response_text})
+            yield {"type": "assistant_start", "agent": "jarvis"}
+            if response_text:
+                yield {"type": "assistant_delta", "agent": "jarvis", "content": response_text}
+            yield {"type": "assistant_complete", "agent": "jarvis"}
+            yield {"type": "request_complete", "agent": "jarvis"}
+            return
 
         # -----------------------------------------------------------------------
         # Medium 2: Resolve capabilities → enabled MCP servers → actual tools
@@ -711,6 +789,7 @@ class JarvisAgent:
 
         loop_index = 0
         MAX_LOOPS = 20  # guard against runaway tool loops
+        first_worker_turn = True
 
         while loop_index < MAX_LOOPS:
             loop_index += 1
@@ -753,24 +832,52 @@ class JarvisAgent:
             content = ""
             tool_calls = []
             emitted_assistant_start = False
+            buffered_first_turn = first_worker_turn
 
             # --- Consume the streaming response synchronously (ollama lib is sync) ---
             self.clear_cancel()  # reset at start of each Ollama call
             cancelled = False
+            t0 = time.time()
+            p_tokens, c_tokens = None, None
+
             for chunk in response:
                 if self._cancel_requested:
                     cancelled = True
                     break
+                
+                # Extract tokens from chunk if available
+                p_eval = getattr(chunk, "prompt_eval_count", None)
+                if p_eval is not None:
+                    p_tokens = p_eval
+                c_eval = getattr(chunk, "eval_count", None)
+                if c_eval is not None:
+                    c_tokens = c_eval
+
                 delta = chunk.message.content or ""
                 if delta:
-                    if not emitted_assistant_start:
-                        yield {"type": "assistant_start", "agent": "jarvis"}
-                        emitted_assistant_start = True
                     content += delta
-                    yield {"type": "assistant_delta", "agent": "jarvis", "content": delta}
+                    if not buffered_first_turn:
+                        if not emitted_assistant_start:
+                            yield {"type": "assistant_start", "agent": "jarvis"}
+                            emitted_assistant_start = True
+                        yield {"type": "assistant_delta", "agent": "jarvis", "content": delta}
                 if chunk.message.tool_calls:
                     for tc in chunk.message.tool_calls:
                         tool_calls.append(tc)
+
+            duration_ms = int((time.time() - t0) * 1000)
+            t_tokens = (p_tokens + c_tokens) if (p_tokens is not None and c_tokens is not None) else None
+
+            from bookkeeping import bookkeeping_service
+            bookkeeping_service.record_llm_usage(
+                model=worker.model,
+                role="worker",
+                success=True,
+                prompt_tokens=p_tokens,
+                completion_tokens=c_tokens,
+                total_tokens=t_tokens,
+                duration_ms=duration_ms
+            )
 
             if cancelled:
                 reply = content.strip()
@@ -780,6 +887,22 @@ class JarvisAgent:
                     yield {"type": "assistant_complete", "agent": "jarvis"}
                 yield {"type": "request_complete", "agent": "jarvis", "cancelled": True}
                 return
+
+            if buffered_first_turn:
+                first_worker_turn = False
+                content, plan_steps = worker.extract_plan(content)
+                if plan_steps:
+                    print(f"[WORKER PLAN] {' -> '.join(plan_steps)}")
+                    yield {
+                        "type": "plan_created",
+                        "agent": "worker",
+                        "id": "worker_plan_1",
+                        "steps": plan_steps,
+                    }
+                if content:
+                    yield {"type": "assistant_start", "agent": "jarvis"}
+                    emitted_assistant_start = True
+                    yield {"type": "assistant_delta", "agent": "jarvis", "content": content}
 
             # --- Tool calls ---
             if tool_calls:
@@ -873,6 +996,7 @@ class JarvisAgent:
             # --- Plain assistant reply, loop ends ---
             reply = content.strip()
             self.conversation.append({"role": "assistant", "content": reply})
+
             if emitted_assistant_start:
                 yield {"type": "assistant_complete", "agent": "jarvis"}
             yield {"type": "request_complete", "agent": "jarvis"}

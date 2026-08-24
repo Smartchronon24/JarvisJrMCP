@@ -221,6 +221,118 @@ async def cancel_chat(request):
 
 
 # ---------------------------------------------------------------------------
+# Bookkeeping REST API (Phase 6.2 — Hard Tasks)
+# Future UI plugs into these endpoints. No SQLite knowledge required.
+# ---------------------------------------------------------------------------
+
+async def get_usage_providers(request):
+    """
+    GET /api/usage/providers
+    Returns quota status for all known providers in one call.
+    """
+    from bookkeeping import bookkeeping_service
+    return JSONResponse(bookkeeping_service.get_all_providers_quota_status())
+
+
+async def get_usage_provider(request):
+    """
+    GET /api/usage/providers/{provider}
+    Returns quota status for a single provider with auto-period-advancement.
+    """
+    from bookkeeping import bookkeeping_service
+    provider = request.path_params["provider"]
+    return JSONResponse(bookkeeping_service.get_provider_usage(provider))
+
+
+async def patch_usage_provider(request):
+    """
+    PATCH /api/usage/providers/{provider}
+    Update quota_limit and/or period_start at runtime — no code change required.
+    Body: { "quota_limit": 1000, "period_start": "2026-09-10", "baseline_used": 16 }
+    """
+    from bookkeeping import bookkeeping_service
+    provider = request.path_params["provider"]
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    quota_limit = data.get("quota_limit")
+    period_start = data.get("period_start")
+    baseline_used = data.get("baseline_used")
+
+    if quota_limit is not None and not isinstance(quota_limit, int):
+        return JSONResponse({"error": "quota_limit must be an integer"}, status_code=400)
+    if baseline_used is not None and (not isinstance(baseline_used, int) or baseline_used < 0):
+        return JSONResponse({"error": "baseline_used must be a non-negative integer"}, status_code=400)
+
+    result = bookkeeping_service.update_provider_quota(
+        provider=provider,
+        quota_limit=quota_limit,
+        period_start=period_start,
+        baseline_used=baseline_used,
+    )
+    if "error" in result:
+        return JSONResponse(result, status_code=500)
+    return JSONResponse(result)
+
+
+async def get_usage_providers_recent(request):
+    """
+    GET /api/usage/providers/{provider}/recent?limit=50
+    Recent individual operations for a provider (timeline view).
+    """
+    from bookkeeping import bookkeeping_service
+    provider = request.path_params.get("provider")
+    try:
+        limit = int(request.query_params.get("limit", 50))
+    except ValueError:
+        limit = 50
+    return JSONResponse(bookkeeping_service.get_recent_provider_usage(provider=provider, limit=limit))
+
+
+async def get_usage_providers_period(request):
+    """
+    GET /api/usage/providers/{provider}/period?from=YYYY-MM-DD&to=YYYY-MM-DD
+    Arbitrary date-range usage query for a provider.
+    """
+    from bookkeeping import bookkeeping_service
+    provider = request.path_params["provider"]
+    from_date = request.query_params.get("from")
+    to_date = request.query_params.get("to")
+
+    if not from_date:
+        return JSONResponse({"error": "Missing 'from' query parameter"}, status_code=400)
+
+    return JSONResponse(bookkeeping_service.get_usage_for_period(provider, from_date, to_date))
+
+
+async def get_usage_llm(request):
+    """
+    GET /api/usage/llm
+    Aggregate summary of LLM usage by role (router/worker/fallback) and model.
+    """
+    from bookkeeping import bookkeeping_service
+    return JSONResponse(bookkeeping_service.get_llm_usage_summary())
+
+
+async def get_usage_llm_recent(request):
+    """
+    GET /api/usage/llm/recent?role=router&limit=50
+    Recent individual LLM invocations, optionally filtered by role.
+    """
+    from bookkeeping import bookkeeping_service
+    role = request.query_params.get("role")
+    try:
+        limit = int(request.query_params.get("limit", 50))
+    except ValueError:
+        limit = 50
+    return JSONResponse(bookkeeping_service.get_recent_llm_usage(role=role, limit=limit))
+
+
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -236,6 +348,14 @@ routes = [
     Route("/api/chat/cancel", endpoint=cancel_chat, methods=["POST"]),
     Route("/api/settings/mcp", endpoint=get_mcp_settings, methods=["GET"]),
     Route("/api/settings/mcp", endpoint=post_mcp_settings, methods=["POST"]),
+    # Bookkeeping API (Phase 6.2)
+    Route("/api/usage/providers", endpoint=get_usage_providers, methods=["GET"]),
+    Route("/api/usage/providers/{provider}", endpoint=get_usage_provider, methods=["GET"]),
+    Route("/api/usage/providers/{provider}", endpoint=patch_usage_provider, methods=["PATCH"]),
+    Route("/api/usage/providers/{provider}/recent", endpoint=get_usage_providers_recent, methods=["GET"]),
+    Route("/api/usage/providers/{provider}/period", endpoint=get_usage_providers_period, methods=["GET"]),
+    Route("/api/usage/llm", endpoint=get_usage_llm, methods=["GET"]),
+    Route("/api/usage/llm/recent", endpoint=get_usage_llm_recent, methods=["GET"]),
     Mount("/", app=StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static"),
 ]
 

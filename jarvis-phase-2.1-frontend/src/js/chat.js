@@ -175,6 +175,10 @@ class ChatInterface {
                 break;
             }
 
+            case 'plan_created':
+                appState.addWorkerPlan(event.steps);
+                break;
+
             case 'tool_call_result': {
                 const exec = activeToolExecs[event.id];
                 if (exec) {

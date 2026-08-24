@@ -46,6 +46,12 @@
                     </svg>
                     <span>Activity</span>
                 </button>
+                <button class="nav-item" data-page="usage">
+                    <svg class="nav-icon" viewBox="0 0 24 24">
+                        <path d="M4 19V5h2v14H4zm7 0V9h2v10h-2zm7 0V2h2v17h-2z"/>
+                    </svg>
+                    <span>Usage</span>
+                </button>
                 <button class="nav-item" data-page="tools">
                     <svg class="nav-icon" viewBox="0 0 24 24">
                         <path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.3-6.7-2.1-2.1-5.5-2.1-7.6 0-2.1 2.1-2.1 5.5 0 7.6 1.7 1.7 4.4 2.2 6.7 1.3l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.4-.4.4-1 0-1.4z"/>
@@ -199,6 +205,65 @@
                 </div>
             </div>
 
+            <!-- Page: Usage -->
+            <div class="page" id="page-usage" data-page="usage">
+                <div class="usage-container">
+                    <div class="usage-header">
+                        <div>
+                            <p class="usage-eyebrow">Resource observatory</p>
+                            <h1>Usage</h1>
+                            <p>See how Jarvis is spending API and model capacity.</p>
+                        </div>
+                        <button class="usage-refresh-btn" id="usage-refresh-btn" type="button" title="Refresh usage data">
+                            <span aria-hidden="true">↻</span> Refresh
+                        </button>
+                    </div>
+
+                    <div class="usage-status" id="usage-status" role="status" aria-live="polite"></div>
+
+                    <section class="usage-section">
+                        <div class="usage-section-heading">
+                            <div>
+                                <p class="usage-kicker">External services</p>
+                                <h2>API quota</h2>
+                            </div>
+                            <span class="usage-section-note">Select a provider to configure usage</span>
+                        </div>
+                        <div class="provider-grid" id="provider-grid">
+                            <div class="usage-loading">Loading provider usage...</div>
+                        </div>
+                    </section>
+
+                    <section class="usage-section">
+                        <div class="usage-section-heading">
+                            <div>
+                                <p class="usage-kicker">Model activity</p>
+                                <h2>Router vs Worker</h2>
+                            </div>
+                            <span class="usage-section-note">Invocation totals and tokens</span>
+                        </div>
+                        <div class="llm-grid" id="llm-grid">
+                            <div class="usage-loading">Loading model usage...</div>
+                        </div>
+                    </section>
+
+                    <section class="usage-section usage-activity-section">
+                        <div class="usage-section-heading">
+                            <div>
+                                <p class="usage-kicker">Latest signals</p>
+                                <h2>Recent activity</h2>
+                            </div>
+                            <span class="usage-section-note">Last 10 recorded operations</span>
+                        </div>
+                        <div class="recent-activity-list" id="recent-activity-list">
+                            <div class="usage-loading">Loading recent activity...</div>
+                        </div>
+                    </section>
+
+                    <div class="usage-detail" id="usage-detail" hidden></div>
+                </div>
+            </div>
+
             <!-- Page: Tools -->
             <div class="page" id="page-tools" data-page="tools">
                 <div class="tools-container">
@@ -309,6 +374,7 @@
     <script src="../js/events.js"></script>
     <script src="../js/chat.js"></script>
     <script src="../js/activity.js"></script>
+    <script src="../js/usage.js?v=baseline-editor"></script>
     <script src="../js/tools.js"></script>
     <script src="../js/settings.js"></script>
     <script src="../js/app.js"></script>

@@ -9,6 +9,7 @@ class JarvisApp {
         this.pages = {
             home: document.getElementById('page-home'),
             activity: document.getElementById('page-activity'),
+            usage: document.getElementById('page-usage'),
             tools: document.getElementById('page-tools'),
             settings: document.getElementById('page-settings'),
         };

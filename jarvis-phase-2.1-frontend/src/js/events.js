@@ -51,6 +51,7 @@ const AppEvents = {
     TOOL_CALL_STARTED: 'tool_call_started',
     TOOL_CALL_RESULT: 'tool_call_result',
     TOOL_CALL_FAILED: 'tool_call_failed',
+    PLAN_CREATED: 'plan_created',
 
     // MCP
     MCP_STATUS_CHANGED: 'mcp_status_changed',

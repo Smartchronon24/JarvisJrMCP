@@ -28,6 +28,31 @@ flowchart TB
   F --> M
 ```
 
+### Router fast-path and Worker planning
+
+The Router can answer simple requests directly when they do not require MCP
+tools, external actions, current information, or deeper reasoning. Direct
+responses use the existing streaming event path and do not create a Worker or
+resolve MCP tools.
+
+Requests that require tools, current information, external actions, or more
+substantial reasoning are delegated to the Orchestrator. Delegated requests
+continue through the enabled MCP policy and are handled by a Worker with only
+the resolved tools.
+
+For delegated multi-step tasks, the Worker conditionally creates a concise
+working plan. It executes the plan through its existing tool-calling loop,
+uses each tool result as context for the next step, and adapts the remaining
+steps when results are missing, contradictory, or unexpected. Single-step
+tasks do not receive unnecessary planning overhead. Planning does not add a
+model, a Planner agent, or any tools beyond those selected by the Orchestrator.
+
+When a Worker creates a plan, its concise display-safe steps are emitted as a
+`plan_created` event and shown in the UI Activity pane. The plan marker is
+removed from the assistant response before chat content is streamed, so plan
+visibility does not change the user-facing answer. This uses the same Worker
+turn and stream; no additional planning model or LLM call is introduced.
+
 ### Request lifecycle
 
 1. `server.py` accepts a chat request at `POST /api/chat/stream`.
@@ -37,6 +62,7 @@ flowchart TB
 5. `Worker` receives only those resolved tools and runs the tool-calling loop with `WORKER_MODEL`.
 6. If routing fails, `_fallback_stream()` runs the original single-agent loop with all currently enabled tools.
 7. Router, Worker, and tool events are streamed to the browser as SSE frames.
+8. Worker plan events are streamed to the browser as SSE frames for Activity visibility.
 
 ### MCP capability registry
 
@@ -60,6 +86,34 @@ Multiple servers may satisfy one capability. The Orchestrator can therefore prov
 - Router failures use the `ROUTER_FAILED` sentinel and preserve the legacy single-agent behavior.
 - Uber ride requests require explicit confirmation in the Python execution layer.
 - The server emits `request_error` and `request_complete` events so the UI can recover from failures without leaving a request in a loading state.
+
+### Usage and bookkeeping
+
+Jarvis includes a Usage page for monitoring external provider quotas and LLM
+activity. The dashboard reads its data from the existing bookkeeping API and
+does not use hard-coded usage values. It displays provider usage for Exa,
+Tavily, and Firecrawl, compares Router and Worker invocations, shows token
+totals when available, and lists recent provider and model activity.
+
+Provider cards can be opened to edit the quota limit, billing-period start,
+and one-time starting usage. Starting usage is intended for requests that
+occurred before bookkeeping was enabled. For example, if Exa had already used
+16 requests, set its starting usage to `16`; future recorded requests are
+added automatically. Starting usage is stored with the provider quota and is
+reset when the provider period advances automatically.
+
+The Usage page also provides loading, empty, partial-error, refresh, and
+responsive states while preserving the existing theme and navigation. The
+bookkeeping API endpoints are:
+
+- `GET /api/usage/providers`
+- `GET /api/usage/providers/{provider}`
+- `PATCH /api/usage/providers/{provider}`
+- `GET /api/usage/providers/{provider}/recent`
+- `GET /api/usage/providers/{provider}/period`
+- `GET /api/usage/llm`
+- `GET /api/usage/llm/recent`
+
 so the MCP server can read the bridge token. If the two components do not share
 the same checkout, set the same `WHATSAPP_BRIDGE_TOKEN` value in both
 environments.
