@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\app.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\app.js */
 /**
  * Main Application Orchestrator
  * Coordinates pages, navigation, initialization

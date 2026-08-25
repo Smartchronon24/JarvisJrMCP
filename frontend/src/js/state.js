@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\state.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\state.js */
 /**
  * Application State Management
  * Centralized state for messages, tool executions, settings

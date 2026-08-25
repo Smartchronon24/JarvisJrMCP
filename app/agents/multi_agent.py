@@ -27,7 +27,6 @@ _CAPABILITY_INTENT_PATTERNS = {
     "browser_automation": re.compile(r"\b(?:open|navigate|click|type|fill|browse|website|webpage)\b", re.IGNORECASE),
     "messaging": re.compile(r"\b(?:whatsapp|message|contact|send)\b", re.IGNORECASE),
     "filesystem": re.compile(r"\b(?:file|folder|directory|read|write|list)\b", re.IGNORECASE),
-    "ride_booking": re.compile(r"\b(?:uber|ride|book a ride|request a ride)\b", re.IGNORECASE),
 }
 
 # ---------------------------------------------------------------------------
@@ -46,10 +45,6 @@ CAPABILITY_REGISTRY = {
     "messaging": {
         "description": "Reading and sending WhatsApp chats, searching WhatsApp contacts.",
         "mcps": ["whatsapp"]
-    },
-    "ride_booking": {
-        "description": "Retrieving Uber ride estimates, requesting rides, checking ride status.",
-        "mcps": ["uber"]
     },
     "filesystem": {
         "description": "Reading, writing, listing, and inspecting files on the local filesystem.",
@@ -158,7 +153,7 @@ Available Capabilities:
 You MUST return a JSON object with the following fields:
 - action: Either "respond" for a simple request you can answer reliably without tools, current information, or external actions, or "delegate" for everything else.
 - response: The complete answer when action is "respond". Use an empty string when action is "delegate".
-- task_type: A short string identifying the task category (e.g., "web_research", "browser_task", "messaging_task", "ride_booking", "filesystem_task", "memory_task", or "general_chat").
+- task_type: A short string identifying the task category (e.g., "web_research", "browser_task", "messaging_task", "filesystem_task", "memory_task", or "general_chat").
 - capabilities: A JSON array of capability names from the list above only. Can be empty [] if no specialist tool is needed (e.g. for simple chat).
 - worker_instruction: A clear, actionable directive for the Worker LLM to execute. Do not include your internal planning.
 - reason: A brief explanation of why you chose these capabilities.
@@ -221,7 +216,7 @@ Example output:
             c_tokens = getattr(response, "eval_count", None)
             t_tokens = (p_tokens + c_tokens) if (p_tokens is not None and c_tokens is not None) else None
 
-            from bookkeeping import bookkeeping_service
+            from app.bookkeeping.service import bookkeeping_service
             bookkeeping_service.record_llm_usage(
                 model=self.model,
                 role="router",
@@ -246,7 +241,7 @@ Example output:
 
         except json.JSONDecodeError as e:
             logger.error(f"Router returned invalid JSON: {e}")
-            from bookkeeping import bookkeeping_service
+            from app.bookkeeping.service import bookkeeping_service
             bookkeeping_service.record_llm_usage(
                 model=self.model,
                 role="router",
@@ -258,7 +253,7 @@ Example output:
         except Exception as e:
             # Hard 4: Model unavailable, network error, timeout, etc.
             logger.error(f"Router failed with exception: {e}")
-            from bookkeeping import bookkeeping_service
+            from app.bookkeeping.service import bookkeeping_service
             bookkeeping_service.record_llm_usage(
                 model=self.model,
                 role="router",

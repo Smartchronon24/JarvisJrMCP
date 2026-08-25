@@ -19,7 +19,7 @@ The browser sends a message to the local streaming endpoint and renders each eve
                  ▼
 ┌─────────────────────────────────┐
 │    Starlette Server (Backend)   │
-│          (server.py)            │
+│        (app/server.py)          │
 └────────────────┬────────────────┘
                  │
                  │ 3. Call async generator (agent.chat_stream)

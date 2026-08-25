@@ -5,7 +5,7 @@ import threading
 import time
 import atexit
 import asyncio
-from ollama_agent import run_agent
+from app.agents.ollama_agent import run_agent
 
 BRIDGE_EXE_PATHS = [
     os.path.join("whatsapp-mcp", "whatsapp-bridge", "whatsapp-bridge.exe"),
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     try:
         start_bridge()
         import uvicorn
-        uvicorn.run("server:app", host="127.0.0.1", port=8000, log_level="info")
+        uvicorn.run("app.server:app", host="127.0.0.1", port=8000, log_level="info")
     except KeyboardInterrupt:
         print("\nExiting...")
     finally:

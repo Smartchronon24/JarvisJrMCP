@@ -26,10 +26,9 @@ TABLE OF CONTENTS
    Step 9:  Run JarvisJr
 5. Features in Detail
    5.1  WhatsApp Integration
-   5.2  Uber Ride Assistant  (Work in Progress)
-   5.3  Memory — Jarvis Remembers You
-   5.4  Web Browsing with Playwright
-   5.5  File System Access
+    5.2  Memory — Jarvis Remembers You
+    5.3  Web Browsing with Playwright
+    5.4  File System Access
 6. Architecture Overview
 7. Known Limitations and Disclaimers
 8. Credits
@@ -40,9 +39,9 @@ TABLE OF CONTENTS
 
 1. INTRODUCTION
 
-JarvisJr is a personal AI assistant built as a Proof of Concept (POC) to demonstrate what a locally-running intelligent agent can do when connected to real-world services. Unlike cloud-based AI chat tools that only respond with text, JarvisJr can take action — it can read and send your WhatsApp messages, look up Uber ride prices, remember important things you tell it, browse the web, and manage files on your computer.
+JarvisJr is a personal AI assistant built as a Proof of Concept (POC) to demonstrate what a locally-running intelligent agent can do when connected to real-world services. Unlike cloud-based AI chat tools that only respond with text, JarvisJr can take action — it can read and send your WhatsApp messages, remember important things you tell it, browse the web, and manage files on your computer.
 
-JarvisJr is powered by large language models (LLMs) running through Ollama, a free tool that lets you run powerful AI models on your own machine without sending your data to external servers. Communication between JarvisJr and the real-world services (WhatsApp, Uber, etc.) is handled through a framework called the Model Context Protocol (MCP), which gives Jarvis a clean and structured way to call external tools and services.
+JarvisJr is powered by large language models (LLMs) running through Ollama, a free tool that lets you run powerful AI models on your own machine without sending your data to external servers. Communication between JarvisJr and the real-world services is handled through a framework called the Model Context Protocol (MCP), which gives Jarvis a clean and structured way to call external tools and services.
 
 This document serves a dual purpose: it is both a technical project report for stakeholders who want to understand what has been built, and a step-by-step setup guide for someone installing and running JarvisJr for the first time on a Windows computer.
 
@@ -59,8 +58,6 @@ At its core, JarvisJr is a conversational AI agent. You type messages to it in a
 Here is a high-level summary of its current capabilities:
 
 - WhatsApp Integration: Jarvis can search your contacts, list your chats, read messages, and send WhatsApp messages directly from the terminal. This is the flagship feature of this POC.
-
-- Uber Ride Assistance: Jarvis can fetch price estimates for Uber rides and assist with the ride booking flow. (Note: Full ride booking is currently restricted to Uber's sandbox/test environment and is a work in progress.)
 
 - Persistent Memory: Jarvis can remember facts, names, preferences, and notes you share with it. These memories are stored locally and persist across sessions.
 
@@ -88,7 +85,7 @@ Software Requirements:
 - Go: Version 1.21 or higher (required for the WhatsApp bridge component)
 - Ollama: Latest version
 - Git: For cloning the repository
-- Internet connection: Required during installation and for WhatsApp/Uber connectivity
+- Internet connection: Required during installation and for WhatsApp connectivity
 
 Hardware Recommendations:
 
@@ -135,7 +132,7 @@ You should see something like: Python 3.11.9
 
 STEP 2: INSTALL NODE.JS
 
-Node.js is required to run several of the MCP plugin servers that JarvisJr uses (for Memory, Uber, Filesystem, and Playwright).
+Node.js is required to run several of the MCP plugin servers that JarvisJr uses (for Memory, Filesystem, and Playwright).
 
 1. Open your web browser and go to: https://nodejs.org/
 2. Click the "LTS" (Long Term Support) download button. This is the stable, recommended version.
@@ -277,13 +274,13 @@ STEP 7: CONFIGURE YOUR SETTINGS
 
 7a. Create Your Environment File
 
-JarvisJr uses a file called ".env" to store private credentials (like your Uber API key). You must create this file from the provided template.
+JarvisJr uses a file called ".env" to store private credentials. You must create this file from the provided template.
 
 In your terminal, from inside the JarvisJrMCP folder, run:
 
     copy .env.example .env
 
-Now open the newly created .env file in any text editor (Notepad is fine) and fill in your details. The file contains comments explaining each field. At minimum, if you want to use the Uber feature, you will need to fill in your UBER_CLIENT_ID and UBER_CLIENT_SECRET from the Uber Developer Dashboard (https://developer.uber.com/dashboard).
+Now open the newly created .env file in any text editor (Notepad is fine) and fill in your details. The file contains comments explaining each field.
 
 7b. Configure the AI Model
 
@@ -396,7 +393,6 @@ JarvisJr will start and display a banner showing all the successfully connected 
 
       Connected MCP Servers:
         memory      — OK
-        uber        — OK
         filesystem  — OK
         playwright  — OK
         whatsapp    — OK
@@ -476,33 +472,7 @@ Important Considerations
 - Group Chats: JarvisJr fully supports group chats. You can read group messages and send messages to groups.
 
 
-5.2 UBER RIDE ASSISTANT (WORK IN PROGRESS)
-
-DISCLAIMER: The Uber integration is currently in an experimental state. Full ride booking requires Uber to approve your developer application for production access, which involves a review process. Until that approval is granted, ride requests operate in Uber's sandbox (test) environment and do not book real rides or charge real money.
-
-What Is Currently Working
-
-- Get Price Estimates: You can ask Jarvis to retrieve price estimates for a ride between two locations (provided as latitude/longitude coordinates).
-    Example: "How much does an Uber from my office to the airport cost?"
-      (You will need to provide the coordinates for now, as automatic address-to-coordinates conversion is not yet implemented.)
-
-- OAuth Authentication Flow: Jarvis can walk you through connecting your Uber account step by step.
-
-- Ride Status and Cancellation: Once a ride is requested in sandbox mode, Jarvis can check its status and cancel it.
-
-Safety Gate
-
-JarvisJr includes a built-in safety mechanism: Jarvis will never automatically book a ride without asking for your explicit confirmation first. Even if you say "book me an Uber to the airport", Jarvis will summarise the ride details and ask you to type YES before proceeding. This protects you from accidental charges.
-
-[SCREENSHOT PLACEHOLDER: A terminal conversation showing Jarvis presenting a ride summary and asking for confirmation before booking.]
-
-What Is Planned
-
-- Automatic address-to-coordinates conversion (so you can say "from my home to Central Station" without needing to know the GPS coordinates).
-- Full production ride booking once Uber developer approval is obtained.
-
-
-5.3 MEMORY — JARVIS REMEMBERS YOU
+5.2 MEMORY — JARVIS REMEMBERS YOU
 
 JarvisJr has a persistent memory system. You can tell Jarvis things about yourself, your preferences, or anything you want it to remember, and it will recall those details in future conversations — even after you close and reopen the application.
 
@@ -559,7 +529,7 @@ JarvisJr follows a layered architecture:
 
 ![JarvisJr Architecture Diagram](C:\Users\navan\.gemini\antigravity\brain\e782e877-65c9-4e7b-b149-db0b3d583ed0\architecture_overview_1787129637190.jpg)
 
-The diagram above shows how all components connect. At the top, the user interacts with the JarvisJr Command-Line Interface. JarvisJr Core (written in Python) sends messages to the Ollama model server to decide what to do next. When a tool is needed, it is dispatched to one of the five MCP servers — Memory, Filesystem, Playwright, Uber, or WhatsApp. The WhatsApp MCP server is unique in that it also requires a companion Go bridge process that maintains the live connection to WhatsApp Web. Each server that handles data writes to its own isolated local folder. External services (WhatsApp Web, Uber API, and websites) are only contacted when the relevant tool is invoked.
+The diagram above shows how all components connect. At the top, the user interacts with the JarvisJr Command-Line Interface. JarvisJr Core (written in Python) sends messages to the Ollama model server to decide what to do next. When a tool is needed, it is dispatched to one of the MCP servers — Memory, Filesystem, Playwright, or WhatsApp. The WhatsApp MCP server is unique in that it also requires a companion Go bridge process that maintains the live connection to WhatsApp Web. Each server that handles data writes to its own isolated local folder. External services (WhatsApp Web and websites) are only contacted when the relevant tool is invoked.
 
 Each MCP server is a separate, isolated process launched by JarvisJr at startup. They communicate with the core agent through a standardised protocol (MCP), which means new tools and capabilities can be added in the future without changing the core agent.
 
@@ -573,11 +543,7 @@ The following are current limitations of this Proof of Concept. Many of these ar
 
 1. Windows Only: This version of JarvisJr has been built and tested exclusively on Windows. macOS and Linux support is planned for a future release.
 
-2. Uber in Sandbox Mode: Uber ride requests currently operate in test mode only and do not book real rides. Full production access requires Uber developer application approval, which is pending.
-
-3. Uber Requires Coordinates: The Uber price estimator requires GPS coordinates for the pickup and dropoff locations. Typing an address in plain text is not yet supported.
-
-4. WhatsApp QR Code Re-Scan: If you reinstall JarvisJr on a new machine or delete the session files, you will need to scan the WhatsApp QR code again. This is a WhatsApp security requirement.
+2. WhatsApp QR Code Re-Scan: If you reinstall JarvisJr on a new machine or delete the session files, you will need to scan the WhatsApp QR code again. This is a WhatsApp security requirement.
 
 5. Ollama Must Be Running: Ollama must be running in the background for JarvisJr to function. It starts automatically with Windows after installation, but if you ever see connection errors, check that the Ollama icon is present in your system tray.
 
@@ -585,7 +551,7 @@ The following are current limitations of this Proof of Concept. Many of these ar
 
 7. Model Token Limits: Very long conversations may eventually exceed the AI model's context window, causing it to lose track of earlier parts of the conversation. Starting a fresh session resolves this.
 
-8. Internet Required for WhatsApp and Uber: WhatsApp and Uber features require an active internet connection. Memory, Filesystem, and (largely) Playwright can work offline.
+6. Internet Required for WhatsApp: WhatsApp features require an active internet connection. Memory, Filesystem, and (largely) Playwright can work offline.
 
 This software is provided as a Proof of Concept for demonstration and evaluation purposes. It is not intended for production use without further hardening, testing, and review.
 
@@ -600,7 +566,6 @@ JarvisJr was designed and developed as a personal project integrating several op
 - Ollama (https://ollama.com) — for running large language models locally.
 - Model Context Protocol / MCP SDK (https://modelcontextprotocol.io) — the framework that connects Jarvis to its tools.
 - WhatsApp MCP Server (https://github.com/verygoodplugins/whatsapp-mcp) — by Very Good Plugins, originally created by Luke Harries. Patched and bundled with permission under the MIT License.
-- mcp-uber (https://github.com/199-mcp/mcp-uber) — Uber MCP integration.
 - @modelcontextprotocol/server-memory — official MCP memory server.
 - @modelcontextprotocol/server-filesystem — official MCP filesystem server.
 - @playwright/mcp — Microsoft's official Playwright MCP server.

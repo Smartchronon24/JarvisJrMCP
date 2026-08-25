@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\settings.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\settings.js */
 /**
  * Settings Screen
  * User preferences, theme, and MCP toggles

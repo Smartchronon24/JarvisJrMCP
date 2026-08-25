@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parent
-MEMORY_FILE = BASE_DIR / "data" / "memory.jsonl"
+BASE_DIR = Path(__file__).resolve().parents[2]
+MEMORY_FILE = BASE_DIR / "data" / "MemoryMCP" / "memory.jsonl"
 
 async def main():
     # Define the server parameters. Here we use npx to run the memory server.

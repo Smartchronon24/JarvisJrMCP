@@ -33,21 +33,6 @@ MCP_SERVERS = {
             "MEMORY_FILE_PATH": str(BASE_DIR / "data" / "MemoryMCP" / "memory.jsonl"),
         },
     },
-    "uber": {
-        "command": "npx.cmd",
-        # mcp-uber (199-mcp/mcp-uber) — OAuth 2.0 + Uber REST API, no browser automation
-        "args": ["-y", "mcp-uber"],
-        "env": {
-            **os.environ,
-            # Credentials are read from environment variables.
-            # Set these in a .env file (see .env.example) or in your shell.
-            # NEVER hardcode credentials here.
-            "UBER_CLIENT_ID":     os.environ.get("UBER_CLIENT_ID", ""),
-            "UBER_CLIENT_SECRET": os.environ.get("UBER_CLIENT_SECRET", ""),
-            "UBER_REDIRECT_URI":  os.environ.get("UBER_REDIRECT_URI", "http://localhost:3000/callback"),
-            "UBER_ENVIRONMENT":   os.environ.get("UBER_ENVIRONMENT", "sandbox"),
-        },
-    },
     "filesystem": {
         "command": "npx.cmd",
         "args": ["-y", "@modelcontextprotocol/server-filesystem", str(BASE_DIR / "data" / "FilesystemMCP")],
@@ -129,19 +114,6 @@ value may be useful for future questions.
 
 Do not preserve every transient value.
 
-Uber MCP Rules:
-- All Uber tools require a 'userId' argument — use 'jarvis' as the default userId.
-- uber_get_price_estimates requires numeric latitude/longitude coordinates, not place names.
-  If the user provides a place name, ask them for coordinates or tell them the lat/lng
-  needed. Do NOT invent coordinates.
-- Before calling any authenticated Uber tool (estimates, ride request, status, cancel),
-  check whether the user has set an access token. If not, call uber_get_auth_url first.
-- NEVER call uber_request_ride without explicit user confirmation. The application will
-  enforce a confirmation gate before the ride request executes.
-- Report Uber API responses exactly as returned. Do not embellish or invent ride results.
-- If an Uber tool returns an error, report the exact error text to the user.
-- Uber sandbox mode is active: ride requests may return synthetic data.
-
 Playwright MCP Rules:
 - Use Playwright MCP tools to control the browser when the user asks you to open a URL, navigate, click, type, or inspect a web page.
 - Prefer structured accessibility snapshots (playwright__browser_snapshot or similar) over screenshots to keep context window usage low.
@@ -164,7 +136,6 @@ Exa MCP Rules:
 - Prefer Exa for INFORMATION RETRIEVAL from the web.
 - Use the minimum number of Exa searches required to answer the request accurately. Do not call Exa repeatedly or in a loop.
 - Do NOT use Exa merely because a website exists. Only use it when you need to retrieve information from the web.
-- Do NOT use Exa for Uber-related queries — use the Uber MCP instead.
 - Do NOT use Exa for WhatsApp queries — use the WhatsApp MCP instead.
 - Use Playwright instead of Exa when the user needs actual browser interaction: opening a website, clicking buttons, filling forms, navigating pages, or any task that requires browser state or UI interaction.
 - Do not use Playwright as a fallback for general web research when Exa can answer the question directly.
@@ -177,7 +148,7 @@ Tavily MCP Rules:
 - Use tavily_crawl to recursively crawl a website and retrieve multiple pages.
 - Use tavily_map to get a full sitemap/URL list for a domain.
 - Use tavily_research for deep, multi-step research tasks that require synthesising many sources.
-- Do NOT use Tavily for Uber, WhatsApp, or tasks that other specialist MCPs handle.
+- Do NOT use Tavily for WhatsApp or tasks that other specialist MCPs handle.
 - Prefer Tavily over Exa when the user explicitly requests deep research or when structured fact-finding across many sources is needed.
 - Report Tavily results accurately. Do not fabricate search results or extracted content.
 
@@ -191,7 +162,7 @@ Firecrawl MCP Rules:
 - Prefer Firecrawl when the user needs the full readable content of a specific page or site, rather than just a web search result.
 - Prefer Exa or Tavily for general web search when full-page scraping is not required.
 - Use Playwright instead of Firecrawl when the task requires actual browser interaction (clicks, form submission, login).
-- Do NOT use Firecrawl for Uber, WhatsApp, or tasks that other specialist MCPs handle.
+- Do NOT use Firecrawl for WhatsApp or tasks that other specialist MCPs handle.
 - Report Firecrawl results accurately. Do not fabricate scraped content.
 
 General rules:

@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
 # Import our JarvisAgent and validation
-from ollama_agent import JarvisAgent, validate_ollama
+from app.agents.ollama_agent import JarvisAgent, validate_ollama
 
 agent = None
 startup_error = None
@@ -230,7 +230,7 @@ async def get_usage_providers(request):
     GET /api/usage/providers
     Returns quota status for all known providers in one call.
     """
-    from bookkeeping import bookkeeping_service
+    from app.bookkeeping.service import bookkeeping_service
     return JSONResponse(bookkeeping_service.get_all_providers_quota_status())
 
 
@@ -239,7 +239,7 @@ async def get_usage_provider(request):
     GET /api/usage/providers/{provider}
     Returns quota status for a single provider with auto-period-advancement.
     """
-    from bookkeeping import bookkeeping_service
+    from app.bookkeeping.service import bookkeeping_service
     provider = request.path_params["provider"]
     return JSONResponse(bookkeeping_service.get_provider_usage(provider))
 
@@ -250,7 +250,7 @@ async def patch_usage_provider(request):
     Update quota_limit and/or period_start at runtime — no code change required.
     Body: { "quota_limit": 1000, "period_start": "2026-09-10", "baseline_used": 16 }
     """
-    from bookkeeping import bookkeeping_service
+    from app.bookkeeping.service import bookkeeping_service
     provider = request.path_params["provider"]
     try:
         data = await request.json()
@@ -282,7 +282,7 @@ async def get_usage_providers_recent(request):
     GET /api/usage/providers/{provider}/recent?limit=50
     Recent individual operations for a provider (timeline view).
     """
-    from bookkeeping import bookkeeping_service
+    from app.bookkeeping.service import bookkeeping_service
     provider = request.path_params.get("provider")
     try:
         limit = int(request.query_params.get("limit", 50))
@@ -296,7 +296,7 @@ async def get_usage_providers_period(request):
     GET /api/usage/providers/{provider}/period?from=YYYY-MM-DD&to=YYYY-MM-DD
     Arbitrary date-range usage query for a provider.
     """
-    from bookkeeping import bookkeeping_service
+    from app.bookkeeping.service import bookkeeping_service
     provider = request.path_params["provider"]
     from_date = request.query_params.get("from")
     to_date = request.query_params.get("to")
@@ -312,7 +312,7 @@ async def get_usage_llm(request):
     GET /api/usage/llm
     Aggregate summary of LLM usage by role (router/worker/fallback) and model.
     """
-    from bookkeeping import bookkeeping_service
+    from app.bookkeeping.service import bookkeeping_service
     return JSONResponse(bookkeeping_service.get_llm_usage_summary())
 
 
@@ -321,7 +321,7 @@ async def get_usage_llm_recent(request):
     GET /api/usage/llm/recent?role=router&limit=50
     Recent individual LLM invocations, optionally filtered by role.
     """
-    from bookkeeping import bookkeeping_service
+    from app.bookkeeping.service import bookkeeping_service
     role = request.query_params.get("role")
     try:
         limit = int(request.query_params.get("limit", 50))
@@ -336,8 +336,8 @@ async def get_usage_llm_recent(request):
 # App
 # ---------------------------------------------------------------------------
 
-BASE_DIR = Path(__file__).resolve().parent
-FRONTEND_DIR = BASE_DIR / "jarvis-phase-2.1-frontend" / "src"
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend" / "src"
 
 routes = [
     Route("/", endpoint=root_redirect),
@@ -362,4 +362,4 @@ routes = [
 app = Starlette(routes=routes, lifespan=lifespan)
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, log_level="info")
+    uvicorn.run("app.server:app", host="127.0.0.1", port=8000, log_level="info")

@@ -55,7 +55,7 @@ turn and stream; no additional planning model or LLM call is introduced.
 
 ### Request lifecycle
 
-1. `server.py` accepts a chat request at `POST /api/chat/stream`.
+1. `app/server.py` accepts a chat request at `POST /api/chat/stream`.
 2. `Router` uses `ROUTER_MODEL` to return a JSON decision containing `task_type`, `capabilities`, `worker_instruction`, and `reason`.
 3. `validate_decision()` supplies safe defaults and removes unknown capabilities.
 4. The Orchestrator maps capabilities through `CAPABILITY_REGISTRY`, intersects the result with `enabled_mcps`, and resolves the matching Ollama tool definitions.
@@ -66,14 +66,13 @@ turn and stream; no additional planning model or LLM call is introduced.
 
 ### MCP capability registry
 
-The registry in `multi_agent.py` currently maps capabilities to these servers:
+The registry in `app/agents/multi_agent.py` currently maps capabilities to these servers:
 
 | Capability | MCP servers |
 | --- | --- |
 | `web_research` | Exa, Tavily, Firecrawl |
 | `browser_automation` | Playwright |
 | `messaging` | WhatsApp |
-| `ride_booking` | Uber |
 | `filesystem` | Filesystem |
 | `memory` | Memory |
 
@@ -84,7 +83,6 @@ Multiple servers may satisfy one capability. The Orchestrator can therefore prov
 - Disabled MCPs are removed from the Worker’s tool payload and blocked again in `execute_tool()`.
 - A Worker tool call outside its resolved allowlist produces a tool error instead of executing.
 - Router failures use the `ROUTER_FAILED` sentinel and preserve the legacy single-agent behavior.
-- Uber ride requests require explicit confirmation in the Python execution layer.
 - The server emits `request_error` and `request_complete` events so the UI can recover from failures without leaving a request in a loading state.
 
 ### Usage and bookkeeping

@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\theme.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\theme.js */
 /**
  * Theme Management
  * Handles dark/light themes and color persistence

@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\tools.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\tools.js */
 /**
  * Tools Screen
  * Displays available MCP capabilities

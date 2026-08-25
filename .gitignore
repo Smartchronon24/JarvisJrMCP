@@ -1,17 +1,38 @@
-# Created by venv; see https://docs.python.org/3/library/venv.html
+# Python environments and caches
+JarvisVenv/
+**/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
 
-/JarvisVenv
-/data
-/__pycache__
-/config/__pycache__/
-/node_modules/
+# Node dependencies and build output
+node_modules/
+**/node_modules/
+dist/
+build/
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# Runtime state, logs, and generated databases
 .playwright-mcp/
-scratch/
+/data/
+whatsapp-mcp/whatsapp-bridge/store/
+*.log
 
+# Temporary experiments and generated test artifacts
+/scratch/
 
-# Environment / secrets — never commit real credentials
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
 
-*.env
-*.json
-*.png
+#Others
+/whatsapp-mcp/*.json
+/whatsapp-mcp/*.png
 *.svg
+*.json
+PHASE_A_FUTURE_NOTES.md

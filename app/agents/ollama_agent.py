@@ -21,7 +21,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
 if sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-# Load .env file if present (e.g. UBER_CLIENT_ID etc.) before settings are imported.
+# Load .env file if present before settings are imported.
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -71,8 +71,12 @@ def mcp_tool_to_ollama(server_name: str, mcp_tool) -> dict:
     """
     scoped_name = _tool_key(server_name, mcp_tool.name)
 
-    # MCP tools carry a JSON Schema under input_schema
-    input_schema = mcp_tool.input_schema or {}
+    # MCP SDK versions expose the JSON Schema as inputSchema or input_schema.
+    input_schema = (
+        getattr(mcp_tool, "input_schema", None)
+        or getattr(mcp_tool, "inputSchema", None)
+        or {}
+    )
     properties_raw = input_schema.get("properties", {})
     required = input_schema.get("required", [])
 
@@ -233,7 +237,12 @@ class JarvisAgent:
             return msg
         
         # --- Strict Validation ---
-        required_fields = mcp_tool.input_schema.get("required", []) if mcp_tool.input_schema else []
+        input_schema = (
+            getattr(mcp_tool, "input_schema", None)
+            or getattr(mcp_tool, "inputSchema", None)
+            or {}
+        )
+        required_fields = input_schema.get("required", [])
         missing = [f for f in required_fields if f not in arguments]
         if missing:
             error_msg = f"[Validation Error] Missing required arguments for {real_tool_name}: {missing}"
@@ -241,27 +250,6 @@ class JarvisAgent:
             print(f"  [MCP] Result  : {error_msg}")
             return error_msg
         # -------------------------
-
-        # --- Booking Safety Guard -----------------------------------------------
-        # uber_request_ride must NEVER fire automatically based on LLM inference.
-        # This gate runs in Python regardless of what the LLM decided.
-        if real_tool_name == "uber_request_ride":
-            print("\n" + "!" * 60)
-            print("  [SAFETY] The LLM wants to call uber_request_ride.")
-            print(f"  [SAFETY] Arguments: {json.dumps(arguments, indent=2)}")
-            print("!" * 60)
-            try:
-                answer = input(
-                    "\n  >>> Type YES (all caps) to confirm the ride request, "
-                    "or anything else to cancel: "
-                ).strip()
-            except (EOFError, KeyboardInterrupt):
-                answer = ""
-            if answer != "YES":
-                print("  [SAFETY] Ride request CANCELLED by user.")
-                return "[Booking cancelled] The user did not confirm the ride request."
-            print("  [SAFETY] User confirmed. Proceeding with uber_request_ride.\n")
-        # ------------------------------------------------------------------------
 
         session = self.sessions.get(server_name)
         if session is None:
@@ -275,6 +263,11 @@ class JarvisAgent:
             t0 = time.time()
             result = await session.call_tool(real_tool_name, arguments)
             duration_ms = int((time.time() - t0) * 1000)
+            result_is_error = bool(
+                getattr(result, "is_error", None)
+                if hasattr(result, "is_error")
+                else getattr(result, "isError", False)
+            )
 
             # Record provider usage for Exa, Tavily, Firecrawl
             if server_name in ("exa", "tavily", "firecrawl"):
@@ -282,7 +275,7 @@ class JarvisAgent:
                 metadata_str = None
                 
                 # Attempt to extract actual usage from result if it's JSON structured
-                if not result.is_error and result.content:
+                if not result_is_error and result.content:
                     try:
                         for item in result.content:
                             if hasattr(item, "text"):
@@ -301,20 +294,20 @@ class JarvisAgent:
                     except Exception:
                         pass
 
-                from bookkeeping import bookkeeping_service
+                from app.bookkeeping.service import bookkeeping_service
                 bookkeeping_service.record_provider_usage(
                     provider=server_name,
                     operation=real_tool_name,
-                    success=not result.is_error,
+                    success=not result_is_error,
                     request_count=actual_count,
                     estimated_count=1,
                     duration_ms=duration_ms,
-                    error_info=str(result.content) if result.is_error else None,
+                    error_info=str(result.content) if result_is_error else None,
                     metadata=metadata_str,
                 )
 
             # Extract a clean text result
-            if result.is_error:
+            if result_is_error:
                 content_str = f"[Tool error] {result.content}"
                 print(f"  [MCP] Status  : ERROR")
                 print(f"  [MCP] Result  : {content_str}")
@@ -527,7 +520,7 @@ class JarvisAgent:
             duration_ms = int((time.time() - t0) * 1000)
             t_tokens = (p_tokens + c_tokens) if (p_tokens is not None and c_tokens is not None) else None
 
-            from bookkeeping import bookkeeping_service
+            from app.bookkeeping.service import bookkeeping_service
             bookkeeping_service.record_llm_usage(
                 model=OLLAMA_MODEL,
                 role="fallback",
@@ -645,7 +638,7 @@ class JarvisAgent:
           request_complete
           request_error     { error: str }
         """
-        from multi_agent import Router, CAPABILITY_REGISTRY, Worker, ROUTER_FAILED
+        from app.agents.multi_agent import Router, CAPABILITY_REGISTRY, Worker, ROUTER_FAILED
 
         print("\n" + "="*50)
         print("[JARVIS] New request")
@@ -868,7 +861,7 @@ class JarvisAgent:
             duration_ms = int((time.time() - t0) * 1000)
             t_tokens = (p_tokens + c_tokens) if (p_tokens is not None and c_tokens is not None) else None
 
-            from bookkeeping import bookkeeping_service
+            from app.bookkeeping.service import bookkeeping_service
             bookkeeping_service.record_llm_usage(
                 model=worker.model,
                 role="worker",

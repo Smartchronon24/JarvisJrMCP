@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\activity.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\activity.js */
 /**
  * Activity Screen & Tool Execution Display
  * Shows MCP tool calls, results, and execution logs

@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\chat.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\chat.js */
 /**
  * Chat Interface & Messaging Logic
  * Handles user input, message display, real SSE streaming responses

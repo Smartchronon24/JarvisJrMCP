@@ -1,4 +1,4 @@
-/* filepath: c:\Navaneth\Study\JarvisMCP\jarvis-phase-2.1-frontend\src\js\mock-data.js */
+/* filepath: c:\Navaneth\Study\JarvisMCP\frontend\src\js\mock-data.js */
 /**
  * Mock Data Layer
  * Provides realistic demo data without backend integration
@@ -103,14 +103,6 @@ const mockMcpServers = [
         connected: true,
         tools: ['send_message', 'read_messages'],
     },
-    {
-        id: 'uber',
-        name: 'Uber',
-        description: 'Ride services',
-        icon: '🚗',
-        connected: true,
-        tools: ['request_ride', 'get_estimates', 'cancel_ride'],
-    },
 ];
 
 const mockSettings = {
@@ -132,6 +124,5 @@ const mockSettings = {
         tavily: true,
         firecrawl: true,
         whatsapp: true,
-        uber: true,
     },
 };
