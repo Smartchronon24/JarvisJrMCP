@@ -87,6 +87,18 @@ MCP_SERVERS = {
             # If running from different locations, set WHATSAPP_BRIDGE_TOKEN.
         },
     },
+    "terminal": {
+        # elleryfamilia/terminal-mcp — full PTY-based headless terminal MCP.
+        # --headless: embedded PTY + MCP server served over stdio (no socket needed).
+        # --cols/--rows: reasonable default terminal dimensions.
+        # CWD is set to BASE_DIR so commands default to the Jarvis project root.
+        "command": "npx.cmd",
+        "args": ["-y", "@ellery/terminal-mcp", "--headless", "--cols", "120", "--rows", "40"],
+        "cwd": str(BASE_DIR),
+        "env": {
+            **os.environ,
+        },
+    },
 }
 
 SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant.
