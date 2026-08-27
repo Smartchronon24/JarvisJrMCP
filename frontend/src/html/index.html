@@ -353,6 +353,58 @@
                             </div>
                         </section>
 
+                        <!-- LLM Settings -->
+                        <section class="settings-section llm-settings-section">
+                            <div class="settings-section-heading">
+                                <div>
+                                    <p class="settings-kicker">Provider control</p>
+                                    <h2>LLM</h2>
+                                </div>
+                                <span class="settings-status" id="llm-status" role="status" aria-live="polite"></span>
+                            </div>
+                            <p class="settings-note">Ollama is local and requires no API key. Changes apply to future requests after saving.</p>
+                            <div class="llm-role-grid">
+                                <div class="llm-role-card">
+                                    <h3>Router</h3>
+                                    <div class="settings-group">
+                                        <label for="router-provider">Provider</label>
+                                        <select id="router-provider" class="input-field llm-provider-select"></select>
+                                    </div>
+                                    <div class="settings-group">
+                                        <label for="router-model">Model</label>
+                                        <select id="router-model" class="input-field llm-model-select"></select>
+                                    </div>
+                                </div>
+                                <div class="llm-role-card">
+                                    <h3>Worker</h3>
+                                    <div class="settings-group">
+                                        <label for="worker-provider">Provider</label>
+                                        <select id="worker-provider" class="input-field llm-provider-select"></select>
+                                    </div>
+                                    <div class="settings-group">
+                                        <label for="worker-model">Model</label>
+                                        <select id="worker-model" class="input-field llm-model-select"></select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="settings-group api-key-list">
+                                <label>API keys</label>
+                                <p class="settings-note">Stored keys are never sent back to the browser. Enter a value only to add or replace one.</p>
+                                <div class="api-key-row">
+                                    <span>Gemini</span><input type="password" id="llm-key-gemini" class="input-field" autocomplete="off" placeholder="Enter API key"><span class="key-status" id="llm-key-status-gemini"></span>
+                                </div>
+                                <div class="api-key-row">
+                                    <span>Anthropic</span><input type="password" id="llm-key-anthropic" class="input-field" autocomplete="off" placeholder="Enter API key"><span class="key-status" id="llm-key-status-anthropic"></span>
+                                </div>
+                                <div class="api-key-row">
+                                    <span>OpenAI</span><input type="password" id="llm-key-openai" class="input-field" autocomplete="off" placeholder="Enter API key"><span class="key-status" id="llm-key-status-openai"></span>
+                                </div>
+                            </div>
+                            <div class="llm-actions">
+                                <button type="button" class="settings-save-btn" id="llm-save-btn">Save Changes</button>
+                            </div>
+                        </section>
+
                         <!-- MCP Capabilities -->
                         <section class="settings-section">
                             <h2>MCP / Capabilities</h2>

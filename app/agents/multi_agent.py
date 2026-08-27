@@ -15,8 +15,7 @@ import json
 import logging
 import re
 import time
-from config.settings import ROUTER_MODEL, WORKER_MODEL
-import ollama
+from app.llm import ProviderError, get_model_config, get_provider
 
 # Configure simple logging
 logger = logging.getLogger("jarvis.multi_agent")
@@ -136,8 +135,10 @@ def validate_decision(decision: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 class Router:
-    def __init__(self, model: str = ROUTER_MODEL):
-        self.model = model
+    def __init__(self, model: str | None = None, provider: str | None = None):
+        config = get_model_config("router")
+        self.model = model or config.model
+        self.provider = get_provider(provider or config.provider)
 
     def _build_system_prompt(self) -> str:
         capabilities_desc = ""
@@ -204,10 +205,10 @@ Example output:
         try:
             # format="json" instructs Ollama to guarantee a JSON response
             t0 = time.time()
-            response = ollama.chat(
+            response = self.provider.chat(
                 model=self.model,
                 messages=messages,
-                format="json"
+                response_format="json",
             )
             duration_ms = int((time.time() - t0) * 1000)
 
@@ -220,6 +221,7 @@ Example output:
             bookkeeping_service.record_llm_usage(
                 model=self.model,
                 role="router",
+                provider=self.provider.name,
                 success=True,
                 prompt_tokens=p_tokens,
                 completion_tokens=c_tokens,
@@ -245,18 +247,20 @@ Example output:
             bookkeeping_service.record_llm_usage(
                 model=self.model,
                 role="router",
+                provider=self.provider.name,
                 success=False,
                 error_info=f"JSONDecodeError: {e}"
             )
             return ROUTER_FAILED
 
-        except Exception as e:
+        except ProviderError as e:
             # Hard 4: Model unavailable, network error, timeout, etc.
             logger.error(f"Router failed with exception: {e}")
             from app.bookkeeping.service import bookkeeping_service
             bookkeeping_service.record_llm_usage(
                 model=self.model,
                 role="router",
+                provider=self.provider.name,
                 success=False,
                 error_info=str(e)
             )
@@ -288,8 +292,15 @@ Example output:
 # ---------------------------------------------------------------------------
 
 class Worker:
-    def __init__(self, model: str = WORKER_MODEL, tools: list[dict] = None):
-        self.model = model
+    def __init__(
+        self,
+        model: str | None = None,
+        tools: list[dict] = None,
+        provider: str | None = None,
+    ):
+        config = get_model_config("worker")
+        self.model = model or config.model
+        self.provider = get_provider(provider or config.provider)
         # tools is the RESTRICTED set of Ollama-format tool defs passed by the Orchestrator
         self.tools = tools or []
         # Build a fast lookup set of allowed scoped tool names (Hard 1 enforcement helper)

@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
 # Import our JarvisAgent and validation
-from app.agents.ollama_agent import JarvisAgent, validate_ollama
+from app.agents.ollama_agent import JarvisAgent, validate_provider
 
 agent = None
 startup_error = None
@@ -21,7 +21,7 @@ startup_error = None
 
 async def startup():
     global agent, startup_error
-    if not validate_ollama():
+    if not validate_provider():
         startup_error = "Ollama is not reachable or the requested model is not available."
         print(f"[FATAL] {startup_error}")
         return
@@ -221,9 +221,116 @@ async def cancel_chat(request):
 
 
 # ---------------------------------------------------------------------------
+# LLM Provider & Model Configuration API (Phase C.1)
+# ---------------------------------------------------------------------------
+
+async def get_llm_config(request):
+    """
+    GET /api/settings/llm
+    Returns current provider/model config for all roles (router, worker, default).
+    """
+    from app.llm import get_model_config
+    from app.llm.credentials import get_provider_api_key
+    providers = {
+        "ollama": {"configured": True, "requires_api_key": False, "local": True},
+        "gemini": {"configured": bool(get_provider_api_key("gemini")), "requires_api_key": True, "local": False},
+        "anthropic": {"configured": bool(get_provider_api_key("anthropic")), "requires_api_key": True, "local": False},
+        "openai": {"configured": bool(get_provider_api_key("openai")), "requires_api_key": True, "local": False},
+    }
+    return JSONResponse({
+        role: {"provider": get_model_config(role).provider, "model": get_model_config(role).model}
+        for role in ("default", "router", "worker")
+    } | {"providers": providers})
+
+
+async def patch_llm_config(request):
+    """
+    PATCH /api/settings/llm/{role}
+    Update provider and/or model for a given role at runtime.
+    Body: { "provider": "gemini", "model": "gemini-2.0-flash" }
+    """
+    from app.llm import set_model_config, get_model_config
+    role = request.path_params.get("role", "default")
+    if role not in ("default", "router", "worker"):
+        return JSONResponse({"error": f"Unknown role '{role}'. Must be: default, router, worker"}, status_code=400)
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    current = get_model_config(role)
+    provider = data.get("provider", current.provider)
+    model = data.get("model", current.model)
+
+    try:
+        updated = set_model_config(role, provider=provider, model=model)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    print(f"[Config] LLM role '{role}' updated → provider={updated.provider}, model={updated.model}")
+    return JSONResponse({"role": role, "provider": updated.provider, "model": updated.model})
+
+
+async def get_provider_key_status(request):
+    """
+    GET /api/settings/keys
+    Returns which providers have API keys set (boolean — never returns the key itself).
+    """
+    from app.llm.credentials import get_provider_api_key
+    providers = ["gemini", "anthropic", "openai"]
+    return JSONResponse({
+        p: bool(get_provider_api_key(p))
+        for p in providers
+    })
+
+
+async def set_provider_key(request):
+    """
+    POST /api/settings/keys/{provider}
+    Store an API key for a provider. Body: { "key": "sk-..." }
+    Key is written to the local credentials file — never logged.
+    """
+    from app.llm.credentials import set_provider_api_key
+    provider = request.path_params.get("provider", "").strip().lower()
+    allowed = {"gemini", "anthropic", "openai"}
+    if provider not in allowed:
+        return JSONResponse({"error": f"Unknown provider '{provider}'. Allowed: {sorted(allowed)}"}, status_code=400)
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    key = data.get("key", "").strip()
+    if not key:
+        return JSONResponse({"error": "key must not be empty"}, status_code=400)
+
+    set_provider_api_key(provider, key)
+    print(f"[Config] API key for '{provider}' updated.")  # intentionally do NOT log the key value
+    return JSONResponse({"provider": provider, "key_set": True})
+
+
+async def list_llm_models(request):
+    """
+    GET /api/settings/llm/models?provider=ollama
+    List available models for a given provider.
+    """
+    from app.llm import get_provider, ProviderError
+    provider_name = request.query_params.get("provider", "ollama")
+    try:
+        provider = get_provider(provider_name)
+        models = provider.list_models()
+        return JSONResponse({"provider": provider_name, "models": models})
+    except ProviderError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+# ---------------------------------------------------------------------------
 # Bookkeeping REST API (Phase 6.2 — Hard Tasks)
 # Future UI plugs into these endpoints. No SQLite knowledge required.
 # ---------------------------------------------------------------------------
+
 
 async def get_usage_providers(request):
     """
@@ -348,6 +455,12 @@ routes = [
     Route("/api/chat/cancel", endpoint=cancel_chat, methods=["POST"]),
     Route("/api/settings/mcp", endpoint=get_mcp_settings, methods=["GET"]),
     Route("/api/settings/mcp", endpoint=post_mcp_settings, methods=["POST"]),
+    # LLM Provider & Model Configuration (Phase C.1)
+    Route("/api/settings/llm", endpoint=get_llm_config, methods=["GET"]),
+    Route("/api/settings/llm/models", endpoint=list_llm_models, methods=["GET"]),
+    Route("/api/settings/llm/{role}", endpoint=patch_llm_config, methods=["PATCH"]),
+    Route("/api/settings/keys", endpoint=get_provider_key_status, methods=["GET"]),
+    Route("/api/settings/keys/{provider}", endpoint=set_provider_key, methods=["POST"]),
     # Bookkeeping API (Phase 6.2)
     Route("/api/usage/providers", endpoint=get_usage_providers, methods=["GET"]),
     Route("/api/usage/providers/{provider}", endpoint=get_usage_provider, methods=["GET"]),
@@ -358,6 +471,7 @@ routes = [
     Route("/api/usage/llm/recent", endpoint=get_usage_llm_recent, methods=["GET"]),
     Mount("/", app=StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static"),
 ]
+
 
 app = Starlette(routes=routes, lifespan=lifespan)
 

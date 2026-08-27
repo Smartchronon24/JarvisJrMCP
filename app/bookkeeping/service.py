@@ -59,6 +59,7 @@ class BookkeepingService:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TEXT NOT NULL,
                         model TEXT NOT NULL,
+                        provider TEXT,
                         role TEXT NOT NULL,
                         success INTEGER NOT NULL,
                         prompt_tokens INTEGER,
@@ -101,6 +102,10 @@ class BookkeepingService:
                 columns = {row["name"] for row in cursor.execute("PRAGMA table_info(provider_quotas)")}
                 if "baseline_used" not in columns:
                     cursor.execute("ALTER TABLE provider_quotas ADD COLUMN baseline_used INTEGER NOT NULL DEFAULT 0")
+
+                llm_columns = {row["name"] for row in cursor.execute("PRAGMA table_info(llm_usage)")}
+                if "provider" not in llm_columns:
+                    cursor.execute("ALTER TABLE llm_usage ADD COLUMN provider TEXT")
 
                 # Seed/sync default provider quota configs if not existing
                 now_str = datetime.now(timezone.utc).isoformat()
@@ -169,6 +174,7 @@ class BookkeepingService:
         self,
         model: str,
         role: str,
+        provider: Optional[str] = None,
         success: bool = True,
         prompt_tokens: Optional[int] = None,
         completion_tokens: Optional[int] = None,
@@ -183,11 +189,11 @@ class BookkeepingService:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO llm_usage (
-                        timestamp, model, role, success, prompt_tokens,
+                        timestamp, model, provider, role, success, prompt_tokens,
                         completion_tokens, total_tokens, duration_ms, error_info
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """, (
-                    timestamp, model, role, 1 if success else 0,
+                    timestamp, model, provider, role, 1 if success else 0,
                     prompt_tokens, completion_tokens, total_tokens,
                     duration_ms, error_info
                 ))
@@ -348,13 +354,14 @@ class BookkeepingService:
                     SELECT
                         role,
                         model,
+                        provider,
                         COUNT(*) as request_count,
                         SUM(prompt_tokens) as total_prompt_tokens,
                         SUM(completion_tokens) as total_completion_tokens,
                         SUM(total_tokens) as total_tokens,
                         AVG(duration_ms) as avg_duration_ms
                     FROM llm_usage
-                    GROUP BY role, model
+                    GROUP BY role, model, provider
                     ORDER BY role, request_count DESC;
                 """)
                 return [dict(r) for r in cursor.fetchall()]
@@ -398,7 +405,7 @@ class BookkeepingService:
                 cursor = conn.cursor()
                 if role:
                     cursor.execute("""
-                        SELECT timestamp, model, role, success,
+                        SELECT timestamp, model, provider, role, success,
                                prompt_tokens, completion_tokens, total_tokens, duration_ms
                         FROM llm_usage WHERE role = ?
                         ORDER BY timestamp DESC LIMIT ?;

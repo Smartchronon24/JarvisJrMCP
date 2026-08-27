@@ -28,18 +28,14 @@ try:
 except ImportError:
     pass  # python-dotenv not installed — rely on shell environment variables
 
-from ollama import Client
-import ollama
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from app.llm import ProviderError, get_model_config, get_provider
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-from config.settings import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_STREAM, MCP_SERVERS, SYSTEM_PROMPT
-
-# Build the Ollama client: None → localhost default, URL string → remote endpoint
-client = Client(host=OLLAMA_HOST) if OLLAMA_HOST else Client()
+from config.settings import OLLAMA_STREAM, MCP_SERVERS, SYSTEM_PROMPT
 
 # ---------------------------------------------------------------------------
 # Tool name collision prevention:
@@ -61,59 +57,17 @@ def _parse_tool_key(tool_key: str):
 
 
 # ---------------------------------------------------------------------------
-# MCP → Ollama tool schema conversion
-# ---------------------------------------------------------------------------
-
-def mcp_tool_to_ollama(server_name: str, mcp_tool) -> dict:
-    """
-    Convert an MCP tool definition to the dict format expected by Ollama's
-    tool-calling API.
-    """
-    scoped_name = _tool_key(server_name, mcp_tool.name)
-
-    # MCP SDK versions expose the JSON Schema as inputSchema or input_schema.
-    input_schema = (
-        getattr(mcp_tool, "input_schema", None)
-        or getattr(mcp_tool, "inputSchema", None)
-        or {}
-    )
-    properties_raw = input_schema.get("properties", {})
-    required = input_schema.get("required", [])
-
-    # Convert each property to Ollama's Property shape
-    properties = {}
-    for prop_name, prop_schema in properties_raw.items():
-        properties[prop_name] = {
-            "type": prop_schema.get("type", "string"),
-            "description": prop_schema.get("description", ""),
-        }
-        # Preserve nested items for array types
-        if "items" in prop_schema:
-            properties[prop_name]["items"] = prop_schema["items"]
-
-    return {
-        "type": "function",
-        "function": {
-            "name": scoped_name,
-            "description": mcp_tool.description or "",
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            },
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
 # Core agent
 # ---------------------------------------------------------------------------
 
 class JarvisAgent:
     def __init__(self):
+        model_config = get_model_config("default")
+        self.model = model_config.model
+        self.provider = get_provider(model_config.provider)
         self.sessions: dict[str, ClientSession] = {}   # server_name → session
         self.tool_map: dict[str, tuple[str, any]] = {} # scoped_tool_key → (server_name, mcp_tool)
-        self.ollama_tools: list[dict] = []             # full tool defs discovered at startup
+        self.llm_tools: list[dict] = []                # full provider-formatted tools
         self.enabled_mcps: set[str] = set()            # which servers are currently enabled
         self.conversation: list[dict] = [              # message history
             {"role": "system", "content": SYSTEM_PROMPT}
@@ -150,7 +104,7 @@ class JarvisAgent:
         This is what gets passed to Ollama — disabled servers are invisible.
         """
         active = []
-        for tool_def in self.ollama_tools:
+        for tool_def in self.llm_tools:
             scoped_name = tool_def["function"]["name"]
             server_name = scoped_name.split("__", 1)[0]
             if server_name in self.enabled_mcps:
@@ -205,7 +159,7 @@ class JarvisAgent:
                 for tool in result.tools:
                     key = _tool_key(server_name, tool.name)
                     self.tool_map[key] = (server_name, tool)
-                    self.ollama_tools.append(mcp_tool_to_ollama(server_name, tool))
+                    self.llm_tools.append(self.provider.format_tool(server_name, tool))
             except Exception as exc:
                 print(f"  [ERROR] Failed to list tools for '{server_name}': {exc}")
 
@@ -343,37 +297,34 @@ class JarvisAgent:
 
         first_reply = True   # print the "Jarvis: " prefix once before streaming
 
-        # Agentic loop: keep calling Ollama until it returns a plain reply
+        # Agentic loop: keep calling the configured provider until it returns a plain reply
         while True:
             tools_payload = self.get_active_tools()
             try:
-                response = ollama.chat(
-                    model=OLLAMA_MODEL,
+                response = self.provider.chat(
+                    model=self.model,
                     messages=self.conversation,
                     tools=tools_payload,
                     stream=OLLAMA_STREAM,
                 )
-            except ollama.ResponseError as exc:
+            except ProviderError as exc:
                 # Some models (e.g. vision models) reject requests that include
                 # a tools field entirely. Detect this and retry without tools.
-                if "does not support tools" in str(exc) and tools_payload:
+                if not exc.supports_tools and tools_payload:
                     print("  [LLM] Model does not support tools — retrying without tool definitions.")
                     try:
-                        response = ollama.chat(
-                            model=OLLAMA_MODEL,
+                        response = self.provider.chat(
+                            model=self.model,
                             messages=self.conversation,
                             tools=None,
                             stream=OLLAMA_STREAM,
                         )
-                    except Exception as exc2:
-                        print(f"  [LLM] [Ollama error] {exc2}")
+                    except ProviderError as exc2:
+                        print(f"  [LLM] [{self.provider.name} error] {exc2}")
                         return ""
                 else:
-                    print(f"  [LLM] [Ollama error] {exc}")
+                    print(f"  [LLM] [{self.provider.name} error] {exc}")
                     return ""
-            except Exception as exc:
-                print(f"  [LLM] [Unexpected error talking to Ollama] {exc}")
-                return ""
 
             content = ""
             tool_calls = []
@@ -449,7 +400,7 @@ class JarvisAgent:
         configured OLLAMA_MODEL, bypassing the Router/Worker layer entirely.
         This preserves existing Jarvis functionality when the Router fails.
         """
-        print(f"\n[JARVIS] Running in single-agent fallback mode with OLLAMA_MODEL: {OLLAMA_MODEL}")
+        print(f"\n[JARVIS] Running in single-agent fallback mode with {self.provider.name} model: {self.model}")
         loop_index = 0
         MAX_LOOPS = 20
 
@@ -459,17 +410,17 @@ class JarvisAgent:
             print(f"[JARVIS] Available tools for fallback: {[t['function']['name'] for t in tools_payload] if tools_payload else []}")
 
             try:
-                response = ollama.chat(
-                    model=OLLAMA_MODEL,
+                response = self.provider.chat(
+                    model=self.model,
                     messages=self.conversation,
                     tools=tools_payload,
                     stream=True,
                 )
-            except ollama.ResponseError as exc:
-                if "does not support tools" in str(exc) and tools_payload:
+            except ProviderError as exc:
+                if not exc.supports_tools and tools_payload:
                     try:
-                        response = ollama.chat(
-                            model=OLLAMA_MODEL,
+                        response = self.provider.chat(
+                            model=self.model,
                             messages=self.conversation,
                             tools=None,
                             stream=True,
@@ -522,8 +473,9 @@ class JarvisAgent:
 
             from app.bookkeeping.service import bookkeeping_service
             bookkeeping_service.record_llm_usage(
-                model=OLLAMA_MODEL,
+                model=self.model,
                 role="fallback",
+                provider=self.provider.name,
                 success=True,
                 prompt_tokens=p_tokens,
                 completion_tokens=c_tokens,
@@ -725,12 +677,16 @@ class JarvisAgent:
         # Hard 2: only servers the user has actually enabled
         allowed_servers = resolved_servers.intersection(self.enabled_mcps)
 
-        # Medium 2: resolve actual tool defs for allowed servers
+        # Medium 3: format actual tool defs for the Worker's provider
+        worker = Worker(tools=[])
         allowed_tools: list[dict] = []
-        for tool_def in self.ollama_tools:
-            server_name = tool_def["function"]["name"].split("__", 1)[0]
+        for _, (server_name, mcp_tool) in self.tool_map.items():
             if server_name in allowed_servers:
-                allowed_tools.append(tool_def)
+                allowed_tools.append(worker.provider.format_tool(server_name, mcp_tool))
+        worker.tools = allowed_tools
+        worker.allowed_tool_names = {
+            tool["function"]["name"] for tool in allowed_tools
+        }
 
         print(f"\n[ORCHESTRATOR] Processing router decision")
         print(f"[ORCHESTRATOR] Selected capabilities: {requested_caps}")
@@ -769,7 +725,6 @@ class JarvisAgent:
         # Medium 3: Build Worker with restricted tools
         # Hard 1: Worker.allowed_tool_names provides the enforcement lookup
         # -----------------------------------------------------------------------
-        worker = Worker(tools=allowed_tools)
         print(f"\n[WORKER] Starting")
         print(f"[WORKER] Model: {worker.model}")
         print(f"[WORKER] Available tools:")
@@ -797,16 +752,16 @@ class JarvisAgent:
 
             # --- Call Ollama (stream=True for real-time token delivery) ---
             try:
-                response = ollama.chat(
+                response = worker.provider.chat(
                     model=worker.model,
                     messages=scoped_conversation,
                     tools=tools_payload,
                     stream=True,
                 )
-            except ollama.ResponseError as exc:
-                if "does not support tools" in str(exc) and tools_payload:
+            except ProviderError as exc:
+                if not exc.supports_tools and tools_payload:
                     try:
-                        response = ollama.chat(
+                        response = worker.provider.chat(
                             model=worker.model,
                             messages=scoped_conversation,
                             tools=None,
@@ -865,6 +820,7 @@ class JarvisAgent:
             bookkeeping_service.record_llm_usage(
                 model=worker.model,
                 role="worker",
+                provider=worker.provider.name,
                 success=True,
                 prompt_tokens=p_tokens,
                 completion_tokens=c_tokens,
@@ -1011,33 +967,53 @@ class JarvisAgent:
 # Startup banner & validation
 # ---------------------------------------------------------------------------
 
-def validate_ollama():
-    """Check Ollama is reachable and the requested model is available."""
-    effective_host = OLLAMA_HOST or "localhost:11434"
+def validate_provider():
+    """
+    Check the configured default provider is reachable.
+
+    For Ollama: verifies the model is present in the local model list.
+    For paid providers (gemini, anthropic, openai): just verifies the API key
+    is set. We skip list_models() because paid providers do not require a
+    local model pre-pull — an invalid model name will fail at first chat() call.
+    """
+    model_config = get_model_config("default")
+    provider = get_provider(model_config.provider)
+
+    # For paid providers, check the API key is present and skip list_models()
+    if provider.name in ("gemini", "anthropic", "openai"):
+        from app.llm.credentials import get_provider_api_key
+        key = get_provider_api_key(provider.name)
+        if not key:
+            print(f"\n[WARNING] No API key found for provider '{provider.name}'.")
+            print(f"          Set {provider.name.upper()}_API_KEY in .env or configure it via the UI.")
+            print(f"          Jarvis will start but LLM calls will fail until a key is set.\n")
+        else:
+            print(f"[OK] Provider '{provider.name}' API key is set.")
+        return True  # Allow startup even without a key — user may set it via UI
+
+    # For Ollama: check model is available locally
     try:
-        models_resp = client.list()  # uses the configured client (local or remote)
-        available = [m.model for m in models_resp.models]
-    except Exception as exc:
-        print(f"\n[FATAL] Cannot reach Ollama service at {effective_host}: {exc}")
-        print("        Make sure Ollama is running  (ollama serve)")
+        available = provider.list_models()
+    except ProviderError as exc:
+        print(f"\n[FATAL] Cannot reach {provider.name} provider: {exc}")
         return False
 
-    if not any(OLLAMA_MODEL in m for m in available):
-        print(f"\n[FATAL] Model '{OLLAMA_MODEL}' is not available at {effective_host}.")
+    if not any(model_config.model in model for model in available):
+        print(f"\n[FATAL] Model '{model_config.model}' is not available from {provider.name}.")
         print(f"        Available models: {available}")
-        print(f"        Pull it with:  ollama pull {OLLAMA_MODEL}")
+        print(f"        Configure an available {provider.name} model in app.llm.config.")
         return False
 
     return True
 
 
 def print_banner(connected: list, failed: list, tool_map: dict):
-    effective_host = OLLAMA_HOST or "localhost:11434"
+    model_config = get_model_config("default")
     print("\n" + "=" * 50)
     print("         Jarvis MCP Test Harness")
     print("=" * 50)
-    print(f"\n  Model  : {OLLAMA_MODEL}")
-    print(f"  Endpoint: {effective_host}\n")
+    print(f"\n  Provider: {model_config.provider}")
+    print(f"  Model  : {model_config.model}\n")
 
     print("  Connected MCP Servers:")
     for name in connected:
@@ -1061,7 +1037,7 @@ def print_banner(connected: list, failed: list, tool_map: dict):
 
 async def run_agent():
     # 1. Validate Ollama before doing anything else
-    if not validate_ollama():
+    if not validate_provider():
         return
 
     agent = JarvisAgent()

@@ -13,10 +13,15 @@ class SettingsScreen {
         this.colorOptions = document.querySelectorAll('.color-option');
         this.animationsToggle = document.getElementById('animations-toggle');
         this.mcpTogglesContainer = document.getElementById('mcp-toggles');
+        this.llmStatus = document.getElementById('llm-status');
+        this.llmSaveButton = document.getElementById('llm-save-btn');
+        this.llmDraft = { router: {}, worker: {} };
+        this.llmProviders = {};
 
         this.setupEventListeners();
         this.renderMcpToggles();
         this.loadSettings();
+        this.loadLlmSettings();
 
         appState.on('mcp_status_changed', () => this.renderMcpToggles());
     }
@@ -62,6 +67,126 @@ class SettingsScreen {
             appState.updateSetting('appearance', 'animations', e.checked);
             this.applyAnimations(e.checked);
         });
+
+        ['router', 'worker'].forEach((role) => {
+            const providerSelect = document.getElementById(`${role}-provider`);
+            const modelSelect = document.getElementById(`${role}-model`);
+            providerSelect.addEventListener('change', () => {
+                this.llmDraft[role].provider = providerSelect.value;
+                this.loadLlmModels(role, providerSelect.value);
+            });
+            modelSelect.addEventListener('change', () => {
+                this.llmDraft[role].model = modelSelect.value;
+            });
+        });
+        this.llmSaveButton.addEventListener('click', () => this.saveLlmSettings());
+    }
+
+    async loadLlmSettings() {
+        try {
+            const response = await fetch('/api/settings/llm');
+            if (!response.ok) throw new Error('Could not load LLM settings.');
+            const data = await response.json();
+            this.llmProviders = data.providers || {};
+            ['router', 'worker'].forEach((role) => {
+                this.llmDraft[role] = { ...data[role] };
+                this.renderLlmProviders(role);
+                this.loadLlmModels(role, data[role].provider, data[role].model);
+            });
+            this.renderKeyStatuses();
+        } catch (error) {
+            this.setLlmStatus(error.message, true);
+        }
+    }
+
+    renderLlmProviders(role) {
+        const select = document.getElementById(`${role}-provider`);
+        select.innerHTML = Object.keys(this.llmProviders).map((provider) => {
+            const label = provider === 'ollama' ? 'Ollama (local)' : provider[0].toUpperCase() + provider.slice(1);
+            return `<option value="${provider}">${label}</option>`;
+        }).join('');
+        select.value = this.llmDraft[role].provider;
+    }
+
+    async loadLlmModels(role, provider, selectedModel = '') {
+        const select = document.getElementById(`${role}-model`);
+        select.disabled = true;
+        select.innerHTML = '<option>Loading models...</option>';
+        try {
+            const response = await fetch(`/api/settings/llm/models?provider=${encodeURIComponent(provider)}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Unable to retrieve models.');
+            const models = Array.isArray(data.models) ? data.models : [];
+            if (selectedModel && !models.includes(selectedModel)) models.unshift(selectedModel);
+            select.innerHTML = models.length
+                ? models.map((model) => `<option value="${this.escapeHtml(model)}">${this.escapeHtml(model)}</option>`).join('')
+                : '<option value="">No models found</option>';
+            select.value = selectedModel || models[0] || '';
+            this.llmDraft[role].model = select.value;
+        } catch (error) {
+            select.innerHTML = `<option value="">${this.escapeHtml(error.message)}</option>`;
+            this.setLlmStatus(`${provider}: ${error.message}`, true);
+        } finally {
+            select.disabled = false;
+        }
+    }
+
+    renderKeyStatuses() {
+        Object.keys(this.llmProviders).filter((provider) => provider !== 'ollama').forEach((provider) => {
+            const status = document.getElementById(`llm-key-status-${provider}`);
+            if (status) status.textContent = this.llmProviders[provider].configured ? 'Configured' : 'Not configured';
+        });
+    }
+
+    async saveLlmSettings() {
+        this.llmSaveButton.disabled = true;
+        this.setLlmStatus('Saving...');
+        try {
+            for (const role of ['router', 'worker']) {
+                if (!this.llmDraft[role].provider || !this.llmDraft[role].model) throw new Error(`${role} provider and model are required.`);
+                const provider = this.llmDraft[role].provider;
+                const providerInfo = this.llmProviders[provider];
+                const keyInput = provider === 'ollama' ? null : document.getElementById(`llm-key-${provider}`);
+                if (providerInfo?.requires_api_key && !providerInfo.configured && !keyInput?.value.trim()) {
+                    throw new Error(`${provider[0].toUpperCase() + provider.slice(1)} API key is required before saving ${role}.`);
+                }
+            }
+            for (const role of ['router', 'worker']) {
+                const response = await fetch(`/api/settings/llm/${role}`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.llmDraft[role]),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || `Could not save ${role} settings.`);
+            }
+            for (const provider of ['gemini', 'anthropic', 'openai']) {
+                const input = document.getElementById(`llm-key-${provider}`);
+                if (!input.value.trim()) continue;
+                const response = await fetch(`/api/settings/keys/${provider}`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: input.value.trim() }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || `Could not save ${provider} key.`);
+                input.value = '';
+                this.llmProviders[provider].configured = true;
+            }
+            this.renderKeyStatuses();
+            this.setLlmStatus('Changes saved.');
+        } catch (error) {
+            this.setLlmStatus(error.message, true);
+        } finally {
+            this.llmSaveButton.disabled = false;
+        }
+    }
+
+    setLlmStatus(message, isError = false) {
+        this.llmStatus.textContent = message;
+        this.llmStatus.classList.toggle('error', isError);
+    }
+
+    escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
     }
 
     loadSettings() {
