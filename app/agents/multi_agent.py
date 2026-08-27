@@ -26,7 +26,6 @@ _CAPABILITY_INTENT_PATTERNS = {
     "browser_automation": re.compile(r"\b(?:open|navigate|click|type|fill|browse|website|webpage)\b", re.IGNORECASE),
     "messaging": re.compile(r"\b(?:whatsapp|message|contact|send)\b", re.IGNORECASE),
     "filesystem": re.compile(r"\b(?:file|folder|directory|read|write|list)\b", re.IGNORECASE),
-    "terminal": re.compile(r"\b(?:terminal|shell|cmd|command|run|execute|pytest|npm|git|install|pip|python)\b", re.IGNORECASE),
 }
 
 # ---------------------------------------------------------------------------
@@ -53,18 +52,6 @@ CAPABILITY_REGISTRY = {
     "memory": {
         "description": "Retrieving past facts, saving entities, logging user observations.",
         "mcps": ["memory"]
-    },
-    "terminal": {
-        "description": (
-            "Executing shell commands, running tests (pytest, npm test), running scripts, "
-            "package installation (pip, npm), system inspection, local git operations (git status, git diff, git log), "
-            "checking Python/Node versions, running build commands. "
-            "Uses a full PTY-based headless terminal. "
-            "To run a command, use: type(command) → sendKey('Enter') → getContent(). "
-            "For long-running commands, use createSession for an isolated session. "
-            "DO NOT use for remote git push/pull or GitHub operations."
-        ),
-        "mcps": ["terminal"]
     }
 }
 
