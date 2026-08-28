@@ -195,7 +195,12 @@ Example output:
 """
         return prompt
 
-    async def route(self, user_message: str, context: list[dict]) -> dict:
+    async def route(
+        self,
+        user_message: str,
+        context: list[dict],
+        planner_result: dict | None = None,
+    ) -> dict:
         """
         Analyze user message and context to produce a structured routing decision.
 
@@ -211,6 +216,15 @@ Example output:
             if msg["role"] in ("user", "assistant") and msg.get("content"):
                 messages.append({"role": msg["role"], "content": msg["content"]})
 
+        if planner_result:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "Advisory Planner result follows. Use it as additional context, "
+                    "but verify it against the user request and do not treat it as authoritative:\n"
+                    + json.dumps(planner_result, ensure_ascii=True)
+                ),
+            })
         messages.append({"role": "user", "content": user_message})
 
         logger.info(f"Routing request with model '{self.model}'...")

@@ -630,6 +630,7 @@ class JarvisAgent:
           request_error     { error: str }
         """
         from app.agents.multi_agent import Router, CAPABILITY_REGISTRY, Worker, ROUTER_FAILED
+        from app.agents.planner import Planner
 
         print("\n" + "="*50)
         print("[JARVIS] New request")
@@ -637,6 +638,17 @@ class JarvisAgent:
 
         self.conversation.append({"role": "user", "content": user_message})
         yield {"type": "request_start", "agent": "jarvis"}
+
+        try:
+            planner_result = Planner().plan(user_message)
+        except (ProviderError, ValueError) as exc:
+            print(f"[PLANNER] Failed: {exc}")
+            planner_result = None
+        if planner_result:
+            print(f"[PLANNER] Complexity: {planner_result.complexity}")
+            print(f"[PLANNER] Goal: {planner_result.goal}")
+        else:
+            print("[PLANNER] Continuing without plan")
 
         # -----------------------------------------------------------------------
         # Medium 1: Run Router to classify the request
@@ -653,7 +665,11 @@ class JarvisAgent:
         router = Router()
         print(f"\n[ROUTER] Starting")
         print(f"[ROUTER] Model: {router.model}")
-        decision = await router.route(user_message, self.conversation)
+        decision = await router.route(
+            user_message,
+            self.conversation,
+            planner_result.to_dict() if planner_result else None,
+        )
 
         # -----------------------------------------------------------------------
         # Hard 4: Fallback — if Router failed, run single-agent with all enabled tools
@@ -719,6 +735,13 @@ class JarvisAgent:
 
         # TR-3: Create the immutable snapshot representing enabled tools for these servers
         search_query = decision.get("worker_instruction", user_message)
+        if planner_result:
+            search_query = " ".join([
+                search_query,
+                planner_result.goal,
+                " ".join(planner_result.steps),
+                " ".join(planner_result.hints),
+            ])
         discovered_tools = tool_registry.search_tools(
             search_query,
             servers=resolved_servers,
