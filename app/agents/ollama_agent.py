@@ -31,6 +31,7 @@ except ImportError:
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from app.llm import ProviderError, get_model_config, get_provider
+from app.tools import tool_registry
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -97,6 +98,8 @@ class JarvisAgent:
             self.enabled_mcps.add(server_name)
         else:
             self.enabled_mcps.discard(server_name)
+        # TR-1: keep registry in sync with runtime policy
+        tool_registry.set_server_enabled(server_name, enabled)
 
     def get_active_tools(self) -> list[dict]:
         """
@@ -151,6 +154,8 @@ class JarvisAgent:
             except Exception as exc:
                 print(f"  [ERROR] Failed to start '{server_name}': {exc}")
                 failed.append(server_name)
+                # TR-1: mark any pre-existing registry entries as unavailable
+                tool_registry.set_server_available(server_name, False)
 
         # Discover tools from every connected server
         for server_name in connected:
@@ -160,6 +165,8 @@ class JarvisAgent:
                     key = _tool_key(server_name, tool.name)
                     self.tool_map[key] = (server_name, tool)
                     self.llm_tools.append(self.provider.format_tool(server_name, tool))
+                    # TR-1: register into the canonical tool catalog
+                    tool_registry.register_mcp_tool(server_name, tool, available=True)
             except Exception as exc:
                 print(f"  [ERROR] Failed to list tools for '{server_name}': {exc}")
 
