@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import logging
 from typing import Iterable
+import re
 
 from app.tools.models import ToolMetadata, ToolSnapshot
 
@@ -266,6 +267,62 @@ class ToolRegistry:
                 continue
             results.append(meta)
         return results
+
+    def search_tools(
+        self,
+        query: str,
+        *,
+        capabilities: Iterable[str] | None = None,
+        servers: Iterable[str] | None = None,
+        enabled_only: bool = True,
+        available_only: bool = True,
+    ) -> list[ToolMetadata]:
+        """
+        Discover registry tools whose metadata contains terms from ``query``.
+
+        This is intentionally a lightweight discovery operation, not the
+        final selection decision. Results remain provider-neutral metadata.
+        """
+        candidates = self.list_tools(
+            enabled_only=enabled_only,
+            available_only=available_only,
+        )
+        capability_set = set(capabilities) if capabilities is not None else None
+        server_set = set(servers) if servers is not None else None
+        query_terms = set(re.findall(r"[a-z0-9]+", query.lower()))
+
+        matches: list[tuple[int, ToolMetadata]] = []
+        for meta in candidates:
+            if capability_set is not None and meta.capability not in capability_set:
+                continue
+            if server_set is not None and meta.server not in server_set:
+                continue
+            searchable = " ".join(
+                (
+                    meta.name,
+                    meta.tool_name,
+                    meta.server,
+                    meta.capability,
+                    meta.description,
+                    " ".join(
+                        str(name)
+                        for name in (meta.input_schema or {}).get("properties", {})
+                    ),
+                )
+            ).lower()
+            overlap = query_terms.intersection(
+                set(re.findall(r"[a-z0-9]+", searchable))
+            )
+            if overlap:
+                matches.append((len(overlap), meta))
+
+        matches.sort(key=lambda item: (-item[0], item[1].name))
+        logger.info(
+            "[TOOL SEARCH] Query: %s | Candidates: %d",
+            query,
+            len(matches),
+        )
+        return [meta for _, meta in matches]
 
     def get_tools_for_capabilities(
         self,

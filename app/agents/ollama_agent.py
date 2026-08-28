@@ -718,9 +718,20 @@ class JarvisAgent:
                     resolved_servers.add(mcp)
 
         # TR-3: Create the immutable snapshot representing enabled tools for these servers
-        candidate_snapshot = tool_registry.create_snapshot(servers=resolved_servers)
+        search_query = decision.get("worker_instruction", user_message)
+        discovered_tools = tool_registry.search_tools(
+            search_query,
+            servers=resolved_servers,
+            enabled_only=True,
+            available_only=True,
+        )
+        if not discovered_tools:
+            print("[TOOL SEARCH] No metadata matches; using capability candidates.")
+            candidate_snapshot = tool_registry.create_snapshot(servers=resolved_servers)
+        else:
+            candidate_snapshot = ToolSnapshot(tools=discovered_tools)
         selected_names = selector.select(
-            decision.get("worker_instruction", user_message),
+            search_query,
             candidates=candidate_snapshot.tools,
         )
         selected_set = set(selected_names)
