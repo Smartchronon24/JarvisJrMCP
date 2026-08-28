@@ -32,6 +32,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from app.llm import ProviderError, get_model_config, get_provider
 from app.tools import tool_registry
+from app.tools.models import ToolSnapshot
+from app.tools.selector import selector
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -104,12 +106,41 @@ class JarvisAgent:
     def get_active_tools(self) -> list[dict]:
         """
         Return only the tool definitions for currently-enabled MCP tools.
-        This uses the Tool Registry to create an eligible ToolSnapshot.
+        This uses the deterministic selector to narrow tools based on the latest user request.
         """
-        snapshot = tool_registry.create_snapshot()
+        # If there is no prior user message, fall back to returning all enabled tools.
+        if len(self.conversation) < 2:
+            snapshot = tool_registry.create_snapshot()
+            active = []
+            for meta in snapshot.tools:
+                entry = self.tool_map.get(meta.name)
+                if entry:
+                    server_name, mcp_tool = entry
+                    active.append(self.provider.format_tool(server_name, mcp_tool))
+            return active or None
+
+        # Extract the last user message (role == "user")
+        last_user_msg = next(
+            (msg["content"] for msg in reversed(self.conversation) if msg["role"] == "user"),
+            "",
+        )
+        # Use the deterministic selector to pick relevant tools.
+        from app.tools.selector import selector
+        selected_names = selector.select(last_user_msg)
+        # If selector could not narrow (empty list), fall back to capability‑filtered set.
+        if not selected_names:
+            # Fallback: use all enabled tools (same as earlier fallback).
+            snapshot = tool_registry.create_snapshot()
+            active = []
+            for meta in snapshot.tools:
+                entry = self.tool_map.get(meta.name)
+                if entry:
+                    server_name, mcp_tool = entry
+                    active.append(self.provider.format_tool(server_name, mcp_tool))
+            return active or None
         active = []
-        for meta in snapshot.tools:
-            entry = self.tool_map.get(meta.name)
+        for name in selected_names:
+            entry = self.tool_map.get(name)
             if entry:
                 server_name, mcp_tool = entry
                 active.append(self.provider.format_tool(server_name, mcp_tool))
@@ -687,7 +718,15 @@ class JarvisAgent:
                     resolved_servers.add(mcp)
 
         # TR-3: Create the immutable snapshot representing enabled tools for these servers
-        snapshot = tool_registry.create_snapshot(servers=resolved_servers)
+        candidate_snapshot = tool_registry.create_snapshot(servers=resolved_servers)
+        selected_names = selector.select(
+            decision.get("worker_instruction", user_message),
+            candidates=candidate_snapshot.tools,
+        )
+        selected_set = set(selected_names)
+        snapshot = ToolSnapshot(
+            tools=[meta for meta in candidate_snapshot.tools if meta.name in selected_set]
+        )
 
         # Boundary: ToolSnapshot -> provider format (using self.tool_map for raw tools)
         # tool_map is the execution-side lookup; we only reach through it here
