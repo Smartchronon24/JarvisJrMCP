@@ -9,21 +9,24 @@ from app.llm.credentials import get_provider_api_key
 
 class GeminiProvider:
     name = "gemini"
+    
+    _shared_client = None
+    _shared_api_key = None
 
     def __init__(self) -> None:
-        self._client = None
-        self._api_key = None
+        pass
 
-    def _get_client(self) -> Any:
+    @classmethod
+    def _get_client(cls) -> Any:
         api_key = get_provider_api_key("gemini")
         if not api_key:
             raise ProviderError("GEMINI_API_KEY is not set. Please set it in .env or via the UI.")
         
-        if self._client is None or self._api_key != api_key:
+        if cls._shared_client is None or cls._shared_api_key != api_key:
             from google import genai
-            self._client = genai.Client(api_key=api_key)
-            self._api_key = api_key
-        return self._client
+            cls._shared_client = genai.Client(api_key=api_key)
+            cls._shared_api_key = api_key
+        return cls._shared_client
 
     def format_tool(self, server_name: str, mcp_tool: Any) -> dict[str, Any]:
         """
@@ -63,25 +66,48 @@ class GeminiProvider:
         """Convert OpenAI-style tool dicts to Gemini FunctionDeclaration objects."""
         from google.genai import types as genai_types
 
+        def build_schema(schema_dict: dict[str, Any]) -> genai_types.Schema:
+            t = schema_dict.get("type", "string").upper()
+            # Gemini Schema types must match genai_types.Type enum strings
+            if t == "STRING":
+                return genai_types.Schema(type=genai_types.Type.STRING, description=schema_dict.get("description", ""))
+            elif t == "INTEGER":
+                return genai_types.Schema(type=genai_types.Type.INTEGER, description=schema_dict.get("description", ""))
+            elif t == "NUMBER":
+                return genai_types.Schema(type=genai_types.Type.NUMBER, description=schema_dict.get("description", ""))
+            elif t == "BOOLEAN":
+                return genai_types.Schema(type=genai_types.Type.BOOLEAN, description=schema_dict.get("description", ""))
+            elif t == "ARRAY":
+                items_schema = schema_dict.get("items")
+                if not items_schema:
+                    # Fallback if array items are unspecified: assume array of strings
+                    items_schema = {"type": "string"}
+                return genai_types.Schema(
+                    type=genai_types.Type.ARRAY,
+                    description=schema_dict.get("description", ""),
+                    items=build_schema(items_schema)
+                )
+            elif t == "OBJECT":
+                props = schema_dict.get("properties", {})
+                return genai_types.Schema(
+                    type=genai_types.Type.OBJECT,
+                    description=schema_dict.get("description", ""),
+                    properties={k: build_schema(v) for k, v in props.items()},
+                    required=schema_dict.get("required", [])
+                )
+            else:
+                # Default to string for unknown types
+                return genai_types.Schema(type=genai_types.Type.STRING, description=schema_dict.get("description", ""))
+
         declarations = []
         for t in tools:
             fn = t.get("function", t)  # handle both OpenAI format and raw
-            params = fn.get("parameters", {})
+            params = fn.get("parameters", {"type": "object", "properties": {}})
             declarations.append(
                 genai_types.FunctionDeclaration(
                     name=fn["name"],
                     description=fn.get("description", ""),
-                    parameters=genai_types.Schema(
-                        type=genai_types.Type.OBJECT,
-                        properties={
-                            k: genai_types.Schema(
-                                type=v.get("type", "string").upper(),
-                                description=v.get("description", ""),
-                            )
-                            for k, v in params.get("properties", {}).items()
-                        },
-                        required=params.get("required", []),
-                    ),
+                    parameters=build_schema(params)
                 )
             )
         return [genai_types.Tool(function_declarations=declarations)]
