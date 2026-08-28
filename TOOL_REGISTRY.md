@@ -1,27 +1,24 @@
-﻿# Tool Registry (TR-1)
+﻿# Tool Registry (TR-3)
 
 ## What is the Tool Registry?
 
-The Tool Registry (`app/tools/`) is the **single source of truth** for all MCP tools known to Jarvis.
+The Tool Registry (pp/tools/) is the **single source of truth** for all MCP tools known to Jarvis.
 
 It is a centralized, in-memory catalog that stores structured metadata about every tool discovered from every MCP server.
 
 ---
 
-## Why does it exist?
+## Responsibility Boundaries
 
-Without a registry, tool knowledge was scattered across:
-- `JarvisAgent.tool_map` — raw MCP tool objects
-- `JarvisAgent.llm_tools` — provider-formatted dicts
-- `JarvisAgent.enabled_mcps` — server-level enable/disable
-- `CAPABILITY_REGISTRY` in `multi_agent.py` — static capability definitions
+The system explicitly enforces strict responsibility boundaries:
 
-As Jarvis scales to potentially hundreds of tools and many MCP servers, having a single, queryable, structured catalog becomes essential for:
-- Tool selection by capability
-- Runtime enable/disable per-tool or per-server
-- Future UI display
-- Future schema adaptation per LLM provider
-- Future tool scoring and relevance ranking
+| Layer                 | Responsibility                                                                 |
+|-----------------------|--------------------------------------------------------------------------------|
+| **MCP Client**        | Connects to servers, lists tools (discovery), executes tools via session.      |
+| **Tool Registry**     | Maintains canonical catalog, tool metadata, capabilities, and enabled state.   |
+| **Orchestrator**      | Determines which capabilities a task requires.                                 |
+| **Tool Snapshot**     | Immutable subset of enabled tools assigned to a specific execution worker.     |
+| **LLM Provider**      | Converts raw MCP schemas into provider-specific schemas (e.g. Ollama/Gemini).  |
 
 ---
 
@@ -33,6 +30,7 @@ As Jarvis scales to potentially hundreds of tools and many MCP servers, having a
 | Storing tool metadata (name, desc, schema) | **Tool Registry** |
 | Grouping tools by server / capability   | **Tool Registry** |
 | Filtering tools (enabled, available)    | **Tool Registry** |
+| Generating Tool Snapshots               | **Tool Registry** |
 | Connecting to MCP servers               | MCP Client      |
 | Calling / executing MCP tools           | MCP Client      |
 | Managing MCP sessions / connections     | MCP Client      |
@@ -40,111 +38,140 @@ As Jarvis scales to potentially hundreds of tools and many MCP servers, having a
 
 ---
 
-## What the MCP Client owns
-
-The MCP Client (`JarvisAgent`) remains responsible for:
-- Starting and connecting MCP server processes
-- Maintaining live `ClientSession` objects
-- Executing tool calls via `session.call_tool()`
-- Tool validation, result parsing, and error handling
-
-The registry **never** calls any MCP tool.
-
----
-
 ## Architecture position
 
-```
-MCP Servers
-     |
-MCP Client  ← connects, calls, manages sessions
-     |
-Tool Discovery  ← list_tools() per server
-     |
-TOOL REGISTRY  ← catalog, filter, metadata
-     |
-Tool Selection / Filtering
-     |
-Agent
-     |
-MCP Client
-     |
-Tool Execution
-```
+`	ext
+                  MCP SERVERS
+                       │
+                       ▼
+                 MCP CLIENT
+                       │
+                 tool discovery
+                       │
+                       ▼
+              ┌─────────────────┐
+              │  TOOL REGISTRY  │
+              │                 │
+              │ What exists?    │
+              │ Where is it?    │
+              │ What capability?│
+              │ Enabled?        │
+              │ Schema?         │
+              └────────┬────────┘
+                       │
+                       ▼
+                ORCHESTRATOR
+                       │
+              What does this task
+              actually need?
+                       │
+                       ▼
+                TOOL SNAPSHOT
+                       │
+                       ▼
+                  LLM PROVIDER
+                       │
+          model-specific formatting
+                       │
+                       ▼
+                    WORKER
+                       │
+                       ▼
+                 MCP CLIENT
+                       │
+                       ▼
+                 TOOL EXECUTION
+`
 
 ---
 
 ## How tools are registered
 
-During `JarvisAgent.connect_servers()`, after each MCP server's tools are discovered via `session.list_tools()`, each tool is automatically passed to `tool_registry.register_mcp_tool()`.
+During JarvisAgent.connect_servers(), after each MCP server's tools are discovered via session.list_tools(), each tool is automatically passed to 	ool_registry.register_mcp_tool().
 
 This is the **only** registration point. Tools are never manually registered.
 
-```python
+`python
 # Inside connect_servers() — automatic, dynamic registration
 for tool in result.tools:
     tool_registry.register_mcp_tool(server_name, tool, available=True)
-```
+`
 
-The registry stores the full raw `inputSchema` verbatim for future LLM adapter use.
+The registry stores the full raw inputSchema verbatim for future LLM adapter use.
+
+---
+
+## Snapshot Lifecycle
+
+Instead of repeatedly querying the global registry during a task, the orchestrator creates a ToolSnapshot.
+
+`	ext
+Task begins
+    ↓
+Capabilities determined
+    ↓
+Registry queried (create_snapshot)
+    ↓
+Snapshot created
+    ↓
+Worker receives snapshot
+    ↓
+Task executes
+    ↓
+Snapshot discarded
+`
+
+A snapshot is immutable and guaranteed to contain only **enabled** and **eligible** tools. The registry completely filters out any tool or server that is disabled.
 
 ---
 
 ## How capabilities work
 
-Each MCP server is mapped to a capability bucket via a deterministic table in `registry.py`:
+Each MCP server is mapped to a capability bucket via a deterministic table in egistry.py:
 
 | Server       | Capability       |
 |--------------|-----------------|
-| `memory`     | `memory`         |
-| `filesystem` | `filesystem`     |
-| `playwright` | `browser`        |
-| `exa`        | `web_research`   |
-| `tavily`     | `web_research`   |
-| `firecrawl`  | `web_research`   |
-| `whatsapp`   | `communication`  |
-| `terminal`   | `terminal`       |
+| memory     | memory         |
+| ilesystem | ilesystem     |
+| playwright | rowser        |
+| exa        | web_research   |
+| 	avily     | web_research   |
+| irecrawl  | web_research   |
+| whatsapp   | communication  |
+| 	erminal   | 	erminal       |
 
-Unknown servers default to `general`.
+Unknown servers default to general.
 
-This classification is intentionally simple and deterministic in TR-1.
+This classification is intentionally simple and deterministic in TR-1/TR-3.
 Future phases may introduce LLM-based or ML-based classification.
 
 ---
 
 ## Registry API (quick reference)
 
-```python
+`python
 from app.tools import tool_registry
 
-# List all tools
-tool_registry.list_tools()
+# Create a snapshot for a task
+snapshot = tool_registry.create_snapshot(servers=["memory", "terminal"])
 
-# Filter by server
-tool_registry.list_tools(server="memory")
+# Get names from snapshot
+names = snapshot.tool_names
+has_memory = snapshot.has_tool("memory__search_nodes")
 
-# Filter by capability
-tool_registry.list_tools(capability="web_research")
-
-# Only enabled tools
-tool_registry.list_tools(enabled_only=True)
-
-# Multi-capability retrieval
-tool_registry.get_tools_for_capabilities(["memory", "communication"])
-
-# Enable / Disable
+# Enable / Disable (immediately affects future snapshots)
 tool_registry.enable_tool("filesystem__write_file")
 tool_registry.disable_tool("filesystem__write_file")
 
 # Bulk server enable/disable
 tool_registry.set_server_enabled("terminal", False)
 
-# Lookup single tool
+# Lookup single tool metadata
 meta = tool_registry.get_tool("memory__search_nodes")
 
 # Registry summary (for logging/debugging)
 tool_registry.summary()
-```
+`
 
 ---
 
@@ -152,6 +179,6 @@ tool_registry.summary()
 
 | File                         | Purpose                                          |
 |------------------------------|--------------------------------------------------|
-| `app/tools/__init__.py`      | Package init; exports `tool_registry` singleton  |
-| `app/tools/models.py`        | `ToolMetadata` dataclass definition              |
-| `app/tools/registry.py`      | `ToolRegistry` class with all operations         |
+| pp/tools/__init__.py      | Package init; exports 	ool_registry & models   |
+| pp/tools/models.py        | ToolMetadata & ToolSnapshot definitions      |
+| pp/tools/registry.py      | ToolRegistry class with all operations         |

@@ -103,15 +103,16 @@ class JarvisAgent:
 
     def get_active_tools(self) -> list[dict]:
         """
-        Return only the tool definitions for currently-enabled MCP servers.
-        This is what gets passed to Ollama — disabled servers are invisible.
+        Return only the tool definitions for currently-enabled MCP tools.
+        This uses the Tool Registry to create an eligible ToolSnapshot.
         """
+        snapshot = tool_registry.create_snapshot()
         active = []
-        for tool_def in self.llm_tools:
-            scoped_name = tool_def["function"]["name"]
-            server_name = scoped_name.split("__", 1)[0]
-            if server_name in self.enabled_mcps:
-                active.append(tool_def)
+        for meta in snapshot.tools:
+            entry = self.tool_map.get(meta.name)
+            if entry:
+                server_name, mcp_tool = entry
+                active.append(self.provider.format_tool(server_name, mcp_tool))
         return active or None
 
     def get_mcp_policy(self) -> dict[str, bool]:
@@ -670,9 +671,13 @@ class JarvisAgent:
             return
 
         # -----------------------------------------------------------------------
-        # Medium 2: Resolve capabilities → enabled MCP servers → actual tools
-        # Hard 2: Enforce disabled MCPs by intersecting with self.enabled_mcps
-        # Hard 3: Unknown capabilities have already been stripped by validate_decision()
+        # TR-3: Resolve capabilities → Tool Snapshot → Worker tools
+        #
+        # Step 1: capability names → server names  (CAPABILITY_REGISTRY, unchanged)
+        # Step 2: Create a ToolSnapshot from the Registry. The registry inherently
+        #         filters out disabled tools and disabled servers.
+        # Step 3: Map snapshot back to provider-formatted tools using tool_map.
+        #         (MCP execution paths remain completely unchanged)
         # -----------------------------------------------------------------------
         requested_caps = decision.get("capabilities", [])
         resolved_servers: set[str] = set()
@@ -681,24 +686,29 @@ class JarvisAgent:
                 for mcp in CAPABILITY_REGISTRY[cap]["mcps"]:
                     resolved_servers.add(mcp)
 
-        # Hard 2: only servers the user has actually enabled
-        allowed_servers = resolved_servers.intersection(self.enabled_mcps)
+        # TR-3: Create the immutable snapshot representing enabled tools for these servers
+        snapshot = tool_registry.create_snapshot(servers=resolved_servers)
 
-        # Medium 3: format actual tool defs for the Worker's provider
+        # Boundary: ToolSnapshot -> provider format (using self.tool_map for raw tools)
+        # tool_map is the execution-side lookup; we only reach through it here
+        # to format tools for the LLM — actual MCP calls still use tool_map directly.
         worker = Worker(tools=[])
         allowed_tools: list[dict] = []
-        for _, (server_name, mcp_tool) in self.tool_map.items():
-            if server_name in allowed_servers:
-                allowed_tools.append(worker.provider.format_tool(server_name, mcp_tool))
+        for meta in snapshot.tools:
+            entry = self.tool_map.get(meta.name)
+            if entry is None:
+                continue
+            server_name, mcp_tool = entry
+            allowed_tools.append(worker.provider.format_tool(server_name, mcp_tool))
+            
         worker.tools = allowed_tools
-        worker.allowed_tool_names = {
-            tool["function"]["name"] for tool in allowed_tools
-        }
+        worker.allowed_tool_names = snapshot.tool_names
 
         print(f"\n[ORCHESTRATOR] Processing router decision")
         print(f"[ORCHESTRATOR] Selected capabilities: {requested_caps}")
         print(f"[ORCHESTRATOR] Enabled MCPs considered: {sorted(self.enabled_mcps)}")
-        print(f"[ORCHESTRATOR] Selected MCPs: {sorted(allowed_servers)}")
+        print(f"[ORCHESTRATOR] Selected MCPs: {sorted(resolved_servers)}")
+        print(f"[ORCHESTRATOR] Registry-eligible tools: {len(snapshot)} (enabled_only=True)")
         print(f"[ORCHESTRATOR] Selected tools:")
         for t_def in allowed_tools:
             print(f"        - {t_def['function']['name']}")
@@ -716,7 +726,7 @@ class JarvisAgent:
             "arguments": {
                 "task_type": decision.get("task_type"),
                 "instruction": decision.get("worker_instruction"),
-                "allowed_servers": sorted(allowed_servers)
+                "allowed_servers": sorted(resolved_servers)
             }
         }
         yield {
@@ -725,7 +735,7 @@ class JarvisAgent:
             "id": "worker_1",
             "server": "worker",
             "tool": "initialize",
-            "result": f"Worker initialised with {len(allowed_tools)} tool(s) from {sorted(allowed_servers)}."
+            "result": f"Worker initialised with {len(allowed_tools)} tool(s) from {sorted(resolved_servers)}."
         }
 
         # -----------------------------------------------------------------------

@@ -1,4 +1,4 @@
-﻿"""
+"""
 app.tools — Tool Registry package
 ==================================
 Exposes the global ``tool_registry`` singleton.
@@ -11,7 +11,7 @@ Import this anywhere in Jarvis to access the registry::
 """
 
 from app.tools.registry import ToolRegistry
-from app.tools.models import ToolMetadata
+from app.tools.models import ToolMetadata, ToolSnapshot
 
 # Global singleton — the single canonical tool catalog for Jarvis.
 tool_registry: ToolRegistry = ToolRegistry()
@@ -19,5 +19,6 @@ tool_registry: ToolRegistry = ToolRegistry()
 __all__ = [
     "ToolRegistry",
     "ToolMetadata",
+    "ToolSnapshot",
     "tool_registry",
 ]

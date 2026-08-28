@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tool Registry — Data Models
 ============================
 Defines the structured representation for a registered tool.
@@ -86,3 +86,27 @@ class ToolMetadata:
             f"capability={self.capability!r}"
             f"{status_str})"
         )
+
+@dataclass(frozen=True)
+class ToolSnapshot:
+    """
+    An immutable snapshot of tools selected for a specific execution.
+    Contains only enabled, eligible tools selected for a task.
+    
+    The orchestrator creates a snapshot via the registry, and the worker
+    is guaranteed to only receive tools present in this snapshot.
+    """
+    tools: list[ToolMetadata]
+
+    @property
+    def tool_names(self) -> set[str]:
+        """Return a set of scoped tool names in this snapshot."""
+        return {t.name for t in self.tools}
+
+    def has_tool(self, name: str) -> bool:
+        """Check if a tool is present in this snapshot."""
+        return name in self.tool_names
+
+    def __len__(self) -> int:
+        return len(self.tools)
+

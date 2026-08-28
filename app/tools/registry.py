@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tool Registry
 =============
 The single source of truth for all discovered MCP tools in Jarvis.
@@ -54,7 +54,7 @@ from __future__ import annotations
 import logging
 from typing import Iterable
 
-from app.tools.models import ToolMetadata
+from app.tools.models import ToolMetadata, ToolSnapshot
 
 logger = logging.getLogger("jarvis.tool_registry")
 
@@ -303,6 +303,61 @@ class ToolRegistry:
             if meta.server in srv_set
             and (not enabled_only or meta.enabled)
         ]
+
+    def get_enabled_tool_names(
+        self,
+        *,
+        server: str | None = None,
+        capability: str | None = None,
+    ) -> set[str]:
+        """
+        Return a set of scoped tool names for all currently-enabled tools.
+
+        Optionally filter by server or capability.  This is the fast path
+        for the Worker's allowed_tool_names enforcement check.
+
+        Example::
+
+            names = registry.get_enabled_tool_names(capability="memory")
+            # → {"memory__search_nodes", "memory__open_nodes", ...}
+        """
+        return {
+            meta.name
+            for meta in self._tools.values()
+            if meta.enabled
+            and (server is None or meta.server == server)
+            and (capability is None or meta.capability == capability)
+        }
+
+    def get_tools_for_server(
+        self,
+        server: str,
+        *,
+        enabled_only: bool = True,
+    ) -> list[ToolMetadata]:
+        """Singular alias for get_tools_for_servers() with a single server name."""
+        return self.get_tools_for_servers([server], enabled_only=enabled_only)
+
+    def create_snapshot(
+        self,
+        *,
+        servers: Iterable[str] | None = None,
+        capabilities: Iterable[str] | None = None,
+    ) -> ToolSnapshot:
+        """
+        Create an immutable ToolSnapshot containing only eligible, enabled tools.
+        
+        If servers or capabilities are provided, the snapshot is restricted to those.
+        If neither is provided, returns all currently enabled tools.
+        """
+        if servers is not None:
+            tools = self.get_tools_for_servers(servers, enabled_only=True)
+        elif capabilities is not None:
+            tools = self.get_tools_for_capabilities(capabilities, enabled_only=True)
+        else:
+            tools = self.list_tools(enabled_only=True)
+            
+        return ToolSnapshot(tools=tools)
 
     # ------------------------------------------------------------------
     # Introspection
