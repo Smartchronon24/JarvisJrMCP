@@ -9,7 +9,6 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, List, Mapping, Set
 
-from app.tools import tool_registry
 from app.tools.models import ToolMetadata
 
 logger = logging.getLogger("jarvis.tool_selector")
@@ -205,13 +204,13 @@ class DeterministicToolSelector(ToolSelectionStrategy):
     def select(
         self,
         request: str,
-        candidates: Iterable[ToolMetadata] | None = None,
+        candidates: Iterable[ToolMetadata],
         max_tools: int | None = None,
         runtime_state: Mapping[str, object] | None = None,
     ) -> List[str]:
-        candidate_list = list(candidates) if candidates is not None else tool_registry.list_tools(
-            enabled_only=True, available_only=True
-        )
+        if candidates is None:
+            raise ValueError("candidates must be provided to the selector")
+        candidate_list = list(candidates)
         limit = max(1, max_tools if max_tools is not None else MAX_SELECTED_TOOLS)
         intents = self._intents(request)
         capabilities = self._capabilities(request)

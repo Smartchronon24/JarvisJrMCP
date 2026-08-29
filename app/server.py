@@ -196,6 +196,7 @@ async def stream_chat(request):
         return EventSourceResponse(bad_req())
 
     message = data.get("message", "").strip()
+    planning_mode = data.get("planning_mode", "AUTO").strip().upper()
     if not message:
         async def empty_msg():
             yield {"data": json.dumps({"type": "request_error", "error": "Empty message"})}
@@ -203,7 +204,7 @@ async def stream_chat(request):
 
     async def event_generator():
         try:
-            async for event in agent.chat_stream(message):
+            async for event in agent.chat_stream(message, planning_mode=planning_mode):
                 yield {"data": json.dumps(event)}
         except Exception as exc:
             yield {"data": json.dumps({"type": "request_error", "error": str(exc)})}
@@ -227,7 +228,7 @@ async def cancel_chat(request):
 async def get_llm_config(request):
     """
     GET /api/settings/llm
-    Returns current provider/model config for all roles (router, worker, default).
+    Returns current provider/model config for all roles.
     """
     from app.llm import get_model_config
     from app.llm.credentials import get_provider_api_key
@@ -239,7 +240,7 @@ async def get_llm_config(request):
     }
     return JSONResponse({
         role: {"provider": get_model_config(role).provider, "model": get_model_config(role).model}
-        for role in ("default", "router", "worker")
+        for role in ("default", "router", "planner", "worker")
     } | {"providers": providers})
 
 
@@ -251,8 +252,8 @@ async def patch_llm_config(request):
     """
     from app.llm import set_model_config, get_model_config
     role = request.path_params.get("role", "default")
-    if role not in ("default", "router", "worker"):
-        return JSONResponse({"error": f"Unknown role '{role}'. Must be: default, router, worker"}, status_code=400)
+    if role not in ("default", "router", "planner", "worker"):
+        return JSONResponse({"error": f"Unknown role '{role}'. Must be: default, router, planner, worker"}, status_code=400)
     try:
         data = await request.json()
     except Exception:

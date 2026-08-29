@@ -7,7 +7,7 @@ Import this anywhere in Jarvis to access the registry::
 
     from app.tools import tool_registry
 
-    tools = tool_registry.list_tools(capability="memory")
+    tools = tool_registry.get_tools_for_capability("memory")
 """
 
 from app.tools.registry import ToolRegistry

@@ -34,25 +34,22 @@ Usage
     from app.tools import tool_registry
 
     # Query all memory tools
-    tools = tool_registry.list_tools(capability="memory")
+    tools = tool_registry.get_tools_for_capability("memory")
 
     # Query tools from a specific server
-    tools = tool_registry.list_tools(server="whatsapp")
+    tools = tool_registry.get_tools_for_server("whatsapp")
 
     # Only enabled tools
-    tools = tool_registry.list_tools(enabled_only=True)
+    tools = tool_registry.get_tools(enabled_only=True)
 
     # Disable a tool at runtime
     tool_registry.disable_tool("filesystem__write_file")
-
-    # Multi-capability retrieval
-    tools = tool_registry.get_tools_for_capabilities(["memory", "terminal"])
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from typing import Iterable, Union
 import re
 
 from app.tools.models import ToolMetadata, ToolSnapshot
@@ -64,7 +61,6 @@ logger = logging.getLogger("jarvis.tool_registry")
 # ---------------------------------------------------------------------------
 # Deterministic mapping: MCP server name -> capability bucket.
 # This is the authoritative classification for TR-1.
-# Future phases may replace or augment this with LLM-based classification.
 
 _SERVER_CAPABILITY_MAP: dict[str, str] = {
     "memory":     "memory",
@@ -79,11 +75,9 @@ _SERVER_CAPABILITY_MAP: dict[str, str] = {
 
 _DEFAULT_CAPABILITY = "general"
 
-
 def _classify_server(server_name: str) -> str:
     """Return the capability bucket for a given server name."""
     return _SERVER_CAPABILITY_MAP.get(server_name, _DEFAULT_CAPABILITY)
-
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -92,13 +86,9 @@ def _classify_server(server_name: str) -> str:
 class ToolRegistry:
     """
     In-memory catalog of all discovered MCP tools.
-
-    Populated at startup by MCP tool discovery.
-    Queried by agents and orchestration layers.
     """
 
     def __init__(self) -> None:
-        # Primary store: scoped tool name -> ToolMetadata
         self._tools: dict[str, ToolMetadata] = {}
         logger.info("ToolRegistry initialised (empty).")
 
@@ -107,17 +97,17 @@ class ToolRegistry:
     # ------------------------------------------------------------------
 
     def register_tool(self, metadata: ToolMetadata) -> None:
-        """
-        Add or replace a tool in the registry.
-
-        If a tool with the same ``name`` already exists it will be
-        overwritten (useful for server reconnects).
-        """
+        """Add or replace a tool in the registry."""
         if metadata.name in self._tools:
             logger.debug("Replacing existing registry entry: %s", metadata.name)
         self._tools[metadata.name] = metadata
         logger.debug("Registered tool: %s [server=%s, capability=%s]",
                      metadata.name, metadata.server, metadata.capability)
+
+    def register_tools(self, tools: Iterable[ToolMetadata]) -> None:
+        """Bulk register multiple tools."""
+        for tool in tools:
+            self.register_tool(tool)
 
     def register_mcp_tool(
         self,
@@ -130,17 +120,11 @@ class ToolRegistry:
         """
         Convenience method: build a ``ToolMetadata`` from a raw MCP tool
         object and register it.
-
-        ``mcp_tool`` is the object returned by ``session.list_tools().tools``.
-        The MCP SDK exposes ``.name``, ``.description``, and
-        ``.inputSchema`` / ``.input_schema`` on these objects.
-
-        Returns the created ``ToolMetadata``.
         """
         raw_name: str = mcp_tool.name  # type: ignore[attr-defined]
         description: str = getattr(mcp_tool, "description", "") or ""
 
-        # Preserve the raw schema verbatim — do NOT normalise or simplify.
+        # Preserve the raw schema verbatim
         input_schema: dict = (
             getattr(mcp_tool, "inputSchema", None)
             or getattr(mcp_tool, "input_schema", None)
@@ -163,7 +147,7 @@ class ToolRegistry:
         self.register_tool(meta)
         return meta
 
-    def remove_tool(self, name: str) -> bool:
+    def unregister_tool(self, name: str) -> bool:
         """Remove a tool from the registry. Returns True if it existed."""
         existed = name in self._tools
         self._tools.pop(name, None)
@@ -171,12 +155,16 @@ class ToolRegistry:
             logger.debug("Removed tool: %s", name)
         return existed
 
+    def remove_tool(self, name: str) -> bool:
+        """Alias for unregister_tool to preserve backward compatibility."""
+        return self.unregister_tool(name)
+
     # ------------------------------------------------------------------
-    # Enable / Disable
+    # State Management
     # ------------------------------------------------------------------
 
     def enable_tool(self, name: str) -> bool:
-        """Enable a tool by its scoped name. Returns True if found."""
+        """Enable a tool by its scoped name."""
         if name in self._tools:
             self._tools[name].enabled = True
             logger.info("Tool enabled: %s", name)
@@ -185,7 +173,7 @@ class ToolRegistry:
         return False
 
     def disable_tool(self, name: str) -> bool:
-        """Disable a tool by its scoped name. Returns True if found."""
+        """Disable a tool by its scoped name."""
         if name in self._tools:
             self._tools[name].enabled = False
             logger.info("Tool disabled: %s", name)
@@ -194,11 +182,7 @@ class ToolRegistry:
         return False
 
     def set_server_enabled(self, server_name: str, enabled: bool) -> int:
-        """
-        Bulk enable/disable all tools belonging to a server.
-
-        Returns the number of tools affected.
-        """
+        """Bulk enable/disable all tools belonging to a server."""
         affected = 0
         for meta in self._tools.values():
             if meta.server == server_name:
@@ -211,12 +195,7 @@ class ToolRegistry:
         return affected
 
     def set_server_available(self, server_name: str, available: bool) -> int:
-        """
-        Bulk mark all tools from a server as available/unavailable.
-        Called when a server reconnects or goes offline.
-
-        Returns the number of tools affected.
-        """
+        """Bulk mark all tools from a server as available/unavailable."""
         affected = 0
         for meta in self._tools.values():
             if meta.server == server_name:
@@ -232,11 +211,11 @@ class ToolRegistry:
         """Look up a single tool by its scoped name."""
         return self._tools.get(name)
 
-    def list_tools(
+    def get_tools(
         self,
         *,
-        server: str | None = None,
-        capability: str | None = None,
+        servers: Union[str, Iterable[str], None] = None,
+        capabilities: Union[str, Iterable[str], None] = None,
         enabled_only: bool = False,
         available_only: bool = False,
     ) -> list[ToolMetadata]:
@@ -245,21 +224,23 @@ class ToolRegistry:
 
         Parameters
         ----------
-        server : str, optional
-            Filter to tools from a specific MCP server, e.g. ``"memory"``.
-        capability : str, optional
-            Filter to tools in a specific capability bucket,
-            e.g. ``"web_research"``.
+        servers : str or Iterable[str], optional
+            Filter to tools from specific MCP servers.
+        capabilities : str or Iterable[str], optional
+            Filter to tools in specific capability buckets.
         enabled_only : bool
             If True, exclude disabled tools.
         available_only : bool
             If True, exclude tools whose server is not available.
         """
+        srv_set = {servers} if isinstance(servers, str) else (set(servers) if servers is not None else None)
+        cap_set = {capabilities} if isinstance(capabilities, str) else (set(capabilities) if capabilities is not None else None)
+
         results: list[ToolMetadata] = []
         for meta in self._tools.values():
-            if server is not None and meta.server != server:
+            if srv_set is not None and meta.server not in srv_set:
                 continue
-            if capability is not None and meta.capability != capability:
+            if cap_set is not None and meta.capability not in cap_set:
                 continue
             if enabled_only and not meta.enabled:
                 continue
@@ -267,6 +248,22 @@ class ToolRegistry:
                 continue
             results.append(meta)
         return results
+
+    def list_tools(self, *, server: str | None = None, capability: str | None = None, enabled_only: bool = False, available_only: bool = False) -> list[ToolMetadata]:
+        """Backward compatibility alias for get_tools."""
+        return self.get_tools(servers=server, capabilities=capability, enabled_only=enabled_only, available_only=available_only)
+
+    def get_tools_for_server(self, server: str, *, enabled_only: bool = True) -> list[ToolMetadata]:
+        """Return all tools belonging to the given server name."""
+        return self.get_tools(servers=server, enabled_only=enabled_only)
+
+    def get_tools_for_capability(self, capability: str, *, enabled_only: bool = True) -> list[ToolMetadata]:
+        """Return all tools that belong to the given capability bucket."""
+        return self.get_tools(capabilities=capability, enabled_only=enabled_only)
+
+    # ------------------------------------------------------------------
+    # Discovery Foundation
+    # ------------------------------------------------------------------
 
     def search_tools(
         self,
@@ -279,24 +276,17 @@ class ToolRegistry:
     ) -> list[ToolMetadata]:
         """
         Discover registry tools whose metadata contains terms from ``query``.
-
-        This is intentionally a lightweight discovery operation, not the
-        final selection decision. Results remain provider-neutral metadata.
         """
-        candidates = self.list_tools(
+        candidates = self.get_tools(
+            servers=servers,
+            capabilities=capabilities,
             enabled_only=enabled_only,
             available_only=available_only,
         )
-        capability_set = set(capabilities) if capabilities is not None else None
-        server_set = set(servers) if servers is not None else None
         query_terms = set(re.findall(r"[a-z0-9]+", query.lower()))
 
         matches: list[tuple[int, ToolMetadata]] = []
         for meta in candidates:
-            if capability_set is not None and meta.capability not in capability_set:
-                continue
-            if server_set is not None and meta.server not in server_set:
-                continue
             searchable = " ".join(
                 (
                     meta.name,
@@ -324,76 +314,9 @@ class ToolRegistry:
         )
         return [meta for _, meta in matches]
 
-    def get_tools_for_capabilities(
-        self,
-        capabilities: Iterable[str],
-        *,
-        enabled_only: bool = True,
-    ) -> list[ToolMetadata]:
-        """
-        Return all tools that belong to any of the given capability buckets.
-
-        Example::
-
-            tools = registry.get_tools_for_capabilities(
-                ["memory", "communication"],
-                enabled_only=True,
-            )
-        """
-        cap_set = set(capabilities)
-        return [
-            meta for meta in self._tools.values()
-            if meta.capability in cap_set
-            and (not enabled_only or meta.enabled)
-        ]
-
-    def get_tools_for_servers(
-        self,
-        servers: Iterable[str],
-        *,
-        enabled_only: bool = True,
-    ) -> list[ToolMetadata]:
-        """Return all tools belonging to any of the given server names."""
-        srv_set = set(servers)
-        return [
-            meta for meta in self._tools.values()
-            if meta.server in srv_set
-            and (not enabled_only or meta.enabled)
-        ]
-
-    def get_enabled_tool_names(
-        self,
-        *,
-        server: str | None = None,
-        capability: str | None = None,
-    ) -> set[str]:
-        """
-        Return a set of scoped tool names for all currently-enabled tools.
-
-        Optionally filter by server or capability.  This is the fast path
-        for the Worker's allowed_tool_names enforcement check.
-
-        Example::
-
-            names = registry.get_enabled_tool_names(capability="memory")
-            # → {"memory__search_nodes", "memory__open_nodes", ...}
-        """
-        return {
-            meta.name
-            for meta in self._tools.values()
-            if meta.enabled
-            and (server is None or meta.server == server)
-            and (capability is None or meta.capability == capability)
-        }
-
-    def get_tools_for_server(
-        self,
-        server: str,
-        *,
-        enabled_only: bool = True,
-    ) -> list[ToolMetadata]:
-        """Singular alias for get_tools_for_servers() with a single server name."""
-        return self.get_tools_for_servers([server], enabled_only=enabled_only)
+    # ------------------------------------------------------------------
+    # Snapshot
+    # ------------------------------------------------------------------
 
     def create_snapshot(
         self,
@@ -403,17 +326,8 @@ class ToolRegistry:
     ) -> ToolSnapshot:
         """
         Create an immutable ToolSnapshot containing only eligible, enabled tools.
-        
-        If servers or capabilities are provided, the snapshot is restricted to those.
-        If neither is provided, returns all currently enabled tools.
         """
-        if servers is not None:
-            tools = self.get_tools_for_servers(servers, enabled_only=True)
-        elif capabilities is not None:
-            tools = self.get_tools_for_capabilities(capabilities, enabled_only=True)
-        else:
-            tools = self.list_tools(enabled_only=True)
-            
+        tools = self.get_tools(servers=servers, capabilities=capabilities, enabled_only=True)
         return ToolSnapshot(tools=tools)
 
     # ------------------------------------------------------------------
@@ -429,11 +343,7 @@ class ToolRegistry:
         return sorted({meta.capability for meta in self._tools.values()})
 
     def summary(self) -> dict:
-        """
-        Return a structured summary of the current registry state.
-
-        Useful for logging and debugging.
-        """
+        """Return a structured summary of the current registry state."""
         servers: dict[str, list[str]] = {}
         for meta in self._tools.values():
             servers.setdefault(meta.server, []).append(meta.name)
@@ -448,19 +358,4 @@ class ToolRegistry:
             "disabled_tools": sum(1 for m in self._tools.values() if not m.enabled),
             "unavailable_tools": sum(1 for m in self._tools.values() if not m.available),
             "servers": {srv: sorted(tools) for srv, tools in sorted(servers.items())},
-            "capabilities": {cap: sorted(tools) for cap, tools in sorted(capabilities.items())},
         }
-
-    def __len__(self) -> int:
-        return len(self._tools)
-
-    def __contains__(self, name: str) -> bool:
-        return name in self._tools
-
-    def __repr__(self) -> str:
-        return (
-            f"ToolRegistry("
-            f"{len(self._tools)} tools, "
-            f"{len(self.all_servers())} servers, "
-            f"{len(self.all_capabilities())} capabilities)"
-        )

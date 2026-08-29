@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -38,7 +39,7 @@ class Planner:
         model: str | None = None,
         provider: str | None = None,
     ) -> None:
-        config = get_model_config("router")
+        config = get_model_config("planner")
         self.model = model or os.getenv("JARVIS_PLANNER_MODEL", config.model)
         provider_name = provider or os.getenv("JARVIS_PLANNER_PROVIDER", config.provider)
         self.provider = get_provider(provider_name)
@@ -51,13 +52,29 @@ Analyze the user's request and return ONLY valid JSON with this shape:
 Produce an advisory plan, not tool names or MCP calls. Keep it concise.
 Do not invent capabilities with certainty; use broad concepts such as messaging,
 filesystem, terminal, memory, web_research, or browser_automation when appropriate.
+Return strict JSON: do not use markdown, trailing commas, or quotation marks
+inside string values. Do not include any text before or after the JSON object.
 
 User request:
 {user_message}"""
 
     @staticmethod
     def _parse(raw: str) -> PlannerResult:
-        data = json.loads(raw)
+        candidate = raw.strip()
+        if candidate.startswith("```"):
+            candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE)
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            # Some local models append prose or emit a trailing comma despite
+            # JSON mode. Decode the first object and normalize only commas
+            # immediately before a closing token.
+            start = candidate.find("{")
+            if start < 0:
+                raise
+            decoder = json.JSONDecoder()
+            fragment = re.sub(r",\s*([}\]])", r"\1", candidate[start:])
+            data, _ = decoder.raw_decode(fragment)
         if not isinstance(data, dict):
             raise ValueError("Planner response must be a JSON object")
 
@@ -102,8 +119,14 @@ User request:
             )
             logger.info("[PLANNER] Completed")
             return result
-        except (ProviderError, ValueError, json.JSONDecodeError) as exc:
+        except (ValueError, json.JSONDecodeError) as exc:
+            logger.warning("[PLANNER] Invalid structured response: %s", exc)
+            logger.info("[PLANNER] Using conservative plan")
+            return PlannerResult(
+                goal=user_message.strip() or "Complete the user's request",
+                complexity="simple",
+            )
+        except ProviderError as exc:
             logger.warning("[PLANNER] Failed: %s", exc)
             logger.info("[PLANNER] Continuing without plan")
             return None
-

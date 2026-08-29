@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis — Personal AI Assistant</title>
+    <title>Jarvis â€” Personal AI Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -81,15 +81,23 @@
             <div class="page" id="page-home" data-page="home">
                 <div class="home-container">
                     <!-- Chat Header -->
-                    <div class="chat-header">
+                    <div class="chat-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <div class="header-left">
                             <h1>Jarvis</h1>
                             <div class="model-info">
                                 <span class="dot online-dot"></span>
-                                <span>Ollama: GPT-OSS:120b-cloud</span>
+                                <span id="header-model-info">Ollama: GPT-OSS:120b-cloud</span>
                             </div>
                         </div>
-                    </div>s
+                        <div class="header-right" style="display: flex; gap: 10px; align-items: center;">
+                            <label for="planning-mode-select" style="font-size: 0.85rem; color: var(--text-muted);">Planning:</label>
+                            <select id="planning-mode-select" style="background: var(--surface-2); border: 1px solid var(--border-color); color: var(--text-primary); padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;">
+                                <option value="AUTO" selected>Auto</option>
+                                <option value="OFF">Off</option>
+                                <option value="FORCE">Force</option>
+                            </select>
+                        </div>
+                    </div>
 
                     <!-- Conversation Area -->
                     <div class="conversation-container">
@@ -107,19 +115,19 @@
                                 <p>Your personal AI assistant, powered by advanced tools and reasoning.</p>
                                 <div class="suggestion-cards">
                                     <button class="suggestion-card" data-suggestion="research">
-                                        <span class="suggestion-icon">🔍</span>
+                                        <span class="suggestion-icon">ðŸ”</span>
                                         <span class="suggestion-text">Research something</span>
                                     </button>
                                     <button class="suggestion-card" data-suggestion="compare">
-                                        <span class="suggestion-icon">⚖️</span>
+                                        <span class="suggestion-icon">âš–ï¸</span>
                                         <span class="suggestion-text">Compare products</span>
                                     </button>
                                     <button class="suggestion-card" data-suggestion="files">
-                                        <span class="suggestion-icon">📁</span>
+                                        <span class="suggestion-icon">ðŸ“</span>
                                         <span class="suggestion-text">Manage my files</span>
                                     </button>
                                     <button class="suggestion-card" data-suggestion="message">
-                                        <span class="suggestion-icon">💬</span>
+                                        <span class="suggestion-icon">ðŸ’¬</span>
                                         <span class="suggestion-text">Send a message</span>
                                     </button>
                                 </div>
@@ -214,7 +222,7 @@
                             <p>See how Jarvis is spending API and model capacity.</p>
                         </div>
                         <button class="usage-refresh-btn" id="usage-refresh-btn" type="button" title="Refresh usage data">
-                            <span aria-hidden="true">↻</span> Refresh
+                            <span aria-hidden="true">â†»</span> Refresh
                         </button>
                     </div>
 
@@ -373,6 +381,17 @@
                                     <div class="settings-group">
                                         <label for="router-model">Model</label>
                                         <select id="router-model" class="input-field llm-model-select"></select>
+                                    </div>
+                                </div>
+                                <div class="llm-role-card">
+                                    <h3>Planner</h3>
+                                    <div class="settings-group">
+                                        <label for="planner-provider">Provider</label>
+                                        <select id="planner-provider" class="input-field llm-provider-select"></select>
+                                    </div>
+                                    <div class="settings-group">
+                                        <label for="planner-model">Model</label>
+                                        <select id="planner-model" class="input-field llm-model-select"></select>
                                     </div>
                                 </div>
                                 <div class="llm-role-card">

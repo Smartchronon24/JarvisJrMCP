@@ -15,7 +15,7 @@ class SettingsScreen {
         this.mcpTogglesContainer = document.getElementById('mcp-toggles');
         this.llmStatus = document.getElementById('llm-status');
         this.llmSaveButton = document.getElementById('llm-save-btn');
-        this.llmDraft = { router: {}, worker: {} };
+        this.llmDraft = { router: {}, planner: {}, worker: {} };
         this.llmProviders = {};
 
         this.setupEventListeners();
@@ -68,7 +68,7 @@ class SettingsScreen {
             this.applyAnimations(e.checked);
         });
 
-        ['router', 'worker'].forEach((role) => {
+        ['router', 'planner', 'worker'].forEach((role) => {
             const providerSelect = document.getElementById(`${role}-provider`);
             const modelSelect = document.getElementById(`${role}-model`);
             providerSelect.addEventListener('change', () => {
@@ -88,7 +88,7 @@ class SettingsScreen {
             if (!response.ok) throw new Error('Could not load LLM settings.');
             const data = await response.json();
             this.llmProviders = data.providers || {};
-            ['router', 'worker'].forEach((role) => {
+            ['router', 'planner', 'worker'].forEach((role) => {
                 this.llmDraft[role] = { ...data[role] };
                 this.renderLlmProviders(role);
                 this.loadLlmModels(role, data[role].provider, data[role].model);
@@ -142,7 +142,7 @@ class SettingsScreen {
         this.llmSaveButton.disabled = true;
         this.setLlmStatus('Saving...');
         try {
-            for (const role of ['router', 'worker']) {
+            for (const role of ['router', 'planner', 'worker']) {
                 if (!this.llmDraft[role].provider || !this.llmDraft[role].model) throw new Error(`${role} provider and model are required.`);
                 const provider = this.llmDraft[role].provider;
                 const providerInfo = this.llmProviders[provider];
@@ -151,7 +151,7 @@ class SettingsScreen {
                     throw new Error(`${provider[0].toUpperCase() + provider.slice(1)} API key is required before saving ${role}.`);
                 }
             }
-            for (const role of ['router', 'worker']) {
+            for (const role of ['router', 'planner', 'worker']) {
                 const response = await fetch(`/api/settings/llm/${role}`, {
                     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.llmDraft[role]),

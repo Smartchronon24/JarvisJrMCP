@@ -124,9 +124,11 @@ class JarvisAgent:
             (msg["content"] for msg in reversed(self.conversation) if msg["role"] == "user"),
             "",
         )
-        # Use the deterministic selector to pick relevant tools.
         from app.tools.selector import selector
-        selected_names = selector.select(last_user_msg)
+        selected_names = selector.select(
+            last_user_msg,
+            candidates=tool_registry.get_tools(enabled_only=True, available_only=True)
+        )
         # If selector could not narrow (empty list), fall back to capability‑filtered set.
         if not selected_names:
             # Fallback: use all enabled tools (same as earlier fallback).
@@ -598,6 +600,7 @@ class JarvisAgent:
             self.conversation.append({"role": "assistant", "content": reply})
             if emitted_assistant_start:
                 yield {"type": "assistant_complete", "agent": "jarvis"}
+            yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
             yield {"type": "request_complete", "agent": "jarvis"}
             print(f"\n[JARVIS] Fallback stream completed")
             print(f"[JARVIS] Final response generated")
@@ -607,6 +610,7 @@ class JarvisAgent:
         print(f"\n[JARVIS] Fallback stream completed (Max loops exceeded)")
         print("="*50 + "\n")
         yield {"type": "request_error", "agent": "jarvis", "error": "Max tool-call loops exceeded."}
+        yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
         yield {"type": "request_complete", "agent": "jarvis"}
 
 
@@ -614,7 +618,7 @@ class JarvisAgent:
     # Streaming LLM turn — yields structured events for SSE delivery
     # ------------------------------------------------------------------
 
-    async def chat_stream(self, user_message: str):
+    async def chat_stream(self, user_message: str, planning_mode: str = "AUTO"):
         """
         Async generator that yields structured event dicts.
 
@@ -639,20 +643,37 @@ class JarvisAgent:
         self.conversation.append({"role": "user", "content": user_message})
         yield {"type": "request_start", "agent": "jarvis"}
 
-        try:
-            planner_result = Planner().plan(user_message)
-        except (ProviderError, ValueError) as exc:
-            print(f"[PLANNER] Failed: {exc}")
+        planner = Planner()
+        yield {"type": "pipeline_state", "stage": "planner", "status": "running", "model": planner.model}
+        needs_plan = True
+        if planning_mode == "OFF":
+            needs_plan = False
+        elif planning_mode == "AUTO":
+            words = user_message.split()
+            if len(words) < 5 and not any(kw in user_message.lower() for kw in ["find", "search", "create", "analyze", "plan"]):
+                needs_plan = False
+                
+        if not needs_plan:
+            print(f"[PLANNER] Skipped (mode={planning_mode})")
             planner_result = None
-        if planner_result:
-            print(f"[PLANNER] Complexity: {planner_result.complexity}")
-            print(f"[PLANNER] Goal: {planner_result.goal}")
+            yield {"type": "pipeline_state", "stage": "planner", "status": "skipped", "mode": planning_mode}
         else:
-            print("[PLANNER] Continuing without plan")
+            try:
+                planner_result = planner.plan(user_message)
+                if planner_result:
+                    yield {"type": "pipeline_state", "stage": "planner", "status": "completed", "result": planner_result.to_dict()}
+                else:
+                    yield {"type": "pipeline_state", "stage": "planner", "status": "failed"}
+            except (ProviderError, ValueError) as exc:
+                print(f"[PLANNER] Failed: {exc}")
+                planner_result = None
+                yield {"type": "pipeline_state", "stage": "planner", "status": "failed", "error": str(exc)}
 
         # -----------------------------------------------------------------------
         # Medium 1: Run Router to classify the request
         # -----------------------------------------------------------------------
+        router = Router()
+        yield {"type": "pipeline_state", "stage": "router", "status": "running", "model": router.model}
         yield {
             "type": "tool_call_start",
             "agent": "router",
@@ -662,7 +683,6 @@ class JarvisAgent:
             "arguments": {"message": user_message}
         }
 
-        router = Router()
         print(f"\n[ROUTER] Starting")
         print(f"[ROUTER] Model: {router.model}")
         decision = await router.route(
@@ -675,6 +695,7 @@ class JarvisAgent:
         # Hard 4: Fallback — if Router failed, run single-agent with all enabled tools
         # -----------------------------------------------------------------------
         if decision is ROUTER_FAILED or decision.get("_router_failed"):
+            yield {"type": "pipeline_state", "stage": "router", "status": "failed"}
             print(f"\n[ROUTER] Decision: ROUTER_FAILED (fallback triggered)")
             yield {
                 "type": "tool_call_error",
@@ -689,6 +710,7 @@ class JarvisAgent:
                 yield event
             return
 
+        yield {"type": "pipeline_state", "stage": "router", "status": "completed", "decision": decision}
         print(f"[ROUTER] Decision:")
         print(f"        task_type: {decision.get('task_type')}")
         print(f"        action: {decision.get('action')}")
@@ -707,6 +729,9 @@ class JarvisAgent:
         }
 
         if decision.get("action") == "respond":
+            yield {"type": "pipeline_state", "stage": "tool_search", "status": "skipped"}
+            yield {"type": "pipeline_state", "stage": "tool_selection", "status": "skipped"}
+            yield {"type": "pipeline_state", "stage": "worker", "status": "skipped"}
             response_text = decision["response"]
             print("[ROUTER] Decision: direct_response")
             self.conversation.append({"role": "assistant", "content": response_text})
@@ -714,6 +739,7 @@ class JarvisAgent:
             if response_text:
                 yield {"type": "assistant_delta", "agent": "jarvis", "content": response_text}
             yield {"type": "assistant_complete", "agent": "jarvis"}
+            yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
             yield {"type": "request_complete", "agent": "jarvis"}
             return
 
@@ -734,6 +760,7 @@ class JarvisAgent:
                     resolved_servers.add(mcp)
 
         # TR-3: Create the immutable snapshot representing enabled tools for these servers
+        yield {"type": "pipeline_state", "stage": "tool_search", "status": "running"}
         search_query = decision.get("worker_instruction", user_message)
         if planner_result:
             search_query = " ".join([
@@ -748,6 +775,8 @@ class JarvisAgent:
             enabled_only=True,
             available_only=True,
         )
+        yield {"type": "pipeline_state", "stage": "tool_search", "status": "completed", "count": len(discovered_tools) if discovered_tools else 0}
+        yield {"type": "pipeline_state", "stage": "tool_selection", "status": "running"}
         if not discovered_tools:
             print("[TOOL SEARCH] No metadata matches; using capability candidates.")
             candidate_snapshot = tool_registry.create_snapshot(servers=resolved_servers)
@@ -776,6 +805,8 @@ class JarvisAgent:
             
         worker.tools = allowed_tools
         worker.allowed_tool_names = snapshot.tool_names
+        yield {"type": "pipeline_state", "stage": "tool_selection", "status": "completed", "tools": list(snapshot.tool_names)}
+        yield {"type": "pipeline_state", "stage": "worker", "status": "running", "model": worker.model}
 
         print(f"\n[ORCHESTRATOR] Processing router decision")
         print(f"[ORCHESTRATOR] Selected capabilities: {requested_caps}")
@@ -1038,6 +1069,7 @@ class JarvisAgent:
 
             if emitted_assistant_start:
                 yield {"type": "assistant_complete", "agent": "jarvis"}
+            yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
             yield {"type": "request_complete", "agent": "jarvis"}
             print(f"\n[WORKER] Completed")
             print(f"\n[JARVIS] Final response generated")
@@ -1049,6 +1081,7 @@ class JarvisAgent:
         print(f"\n[JARVIS] Final response generated with error")
         print("="*50 + "\n")
         yield {"type": "request_error", "agent": "jarvis", "error": "Max tool-call loops exceeded."}
+        yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
         yield {"type": "request_complete", "agent": "jarvis"}
 
 

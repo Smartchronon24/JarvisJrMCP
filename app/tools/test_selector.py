@@ -68,7 +68,8 @@ def register_dummy_tools():
 def main():
     register_dummy_tools()
     request = "Read a Python file and inspect its contents."
-    selected = selector.select(request)
+    candidates = tool_registry.get_tools()
+    selected = selector.select(request, candidates=candidates)
     print("Selected tools for request:", request)
     for name in selected:
         print(" -", name)

@@ -1,0 +1,193 @@
+
+/* ============================================================
+   Pipeline Execution Widget — Jarvis UI
+   Supports: running / completed / failed / skipped / pending
+   ============================================================ */
+
+/* Pipeline wrapper message */
+.pipeline-message {
+    align-items: flex-start;
+}
+.pipeline-avatar {
+    opacity: 0.6;
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+.pipeline-content {
+    width: 100%;
+    min-width: 0;
+}
+
+/* Container card */
+.pipeline-container {
+    background: var(--surface-1, #1a1a2e);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.875rem;
+    color: var(--text-secondary, #aaa);
+    max-width: 640px;
+}
+
+/* Header row */
+.pipeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--text-primary, #eee);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color, #333);
+}
+.pipeline-mode-badge {
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--surface-2, #252545);
+    color: var(--text-muted, #777);
+    text-transform: none;
+    letter-spacing: 0;
+}
+.pipeline-mode-badge[data-mode="FORCE"] { color: #f59e0b; }
+.pipeline-mode-badge[data-mode="OFF"]   { color: #6b7280; }
+
+/* Stage row */
+.pipeline-stage {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border-color, #2a2a3e);
+}
+.pipeline-stage:last-child { border-bottom: none; }
+
+/* Status icon */
+.stage-icon {
+    width: 14px;
+    min-width: 14px;
+    text-align: center;
+    font-size: 0.8rem;
+    margin-top: 1px;
+    font-weight: bold;
+}
+.stage-icon.running   { color: var(--accent-color, #8b5cf6); animation: pulse 1.5s ease-in-out infinite; }
+.stage-icon.completed { color: #10b981; }
+.stage-icon.failed    { color: #ef4444; }
+.stage-icon.skipped   { color: var(--text-muted, #555); }
+.stage-icon.pending   { color: var(--text-muted, #555); }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+}
+
+/* Stage content */
+.stage-content { flex: 1; min-width: 0; }
+
+.stage-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-primary, #eee);
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+.stage-title:hover .stage-label { color: var(--accent-color, #8b5cf6); }
+
+.stage-status-text {
+    font-size: 0.72rem;
+    color: var(--text-muted, #777);
+    flex-shrink: 0;
+}
+
+/* Collapsible details panel */
+.stage-details {
+    display: none;
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--surface-2, #1e1e36);
+    border-radius: 5px;
+    font-size: 0.82rem;
+}
+.stage-details.expanded { display: block; }
+
+/* Detail sub-elements */
+.detail-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 3px;
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+.detail-key {
+    font-size: 0.75rem;
+    color: var(--text-muted, #777);
+    min-width: 80px;
+    flex-shrink: 0;
+}
+.detail-val {
+    color: var(--text-secondary, #ccc);
+    word-break: break-all;
+}
+.detail-section-title {
+    font-size: 0.72rem;
+    color: var(--text-muted, #777);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 6px 0 3px;
+}
+.detail-step {
+    color: var(--text-secondary, #ccc);
+    margin-bottom: 2px;
+    padding-left: 4px;
+}
+.detail-tool-row {
+    font-size: 0.82rem;
+    color: #10b981;
+    margin-bottom: 2px;
+}
+.detail-tool-row code {
+    background: transparent;
+    color: inherit;
+    font-family: monospace;
+}
+.detail-pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 0.78rem;
+    color: var(--text-secondary, #ccc);
+    background: var(--surface-1, #111);
+    border-radius: 4px;
+    padding: 6px;
+    margin: 4px 0 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.detail-error {
+    color: #ef4444;
+    margin-top: 4px;
+    font-size: 0.82rem;
+}
+.detail-warn {
+    color: #f59e0b;
+    margin-top: 4px;
+    font-size: 0.82rem;
+}
+.pill {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--surface-1, #111);
+    border: 1px solid var(--border-color, #333);
+    font-size: 0.72rem;
+    color: var(--accent-color, #8b5cf6);
+    margin-right: 3px;
+}

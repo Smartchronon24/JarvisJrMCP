@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from config.settings import OLLAMA_MODEL, ROUTER_MODEL
+from config.settings import OLLAMA_MODEL, PLANNER_MODEL, ROUTER_MODEL
 from app.llm.base import LLMProvider
 
 
@@ -19,6 +19,10 @@ _MODEL_CONFIGS: dict[str, ModelConfig] = {
     "router": ModelConfig(
         provider=os.environ.get("JARVIS_ROUTER_PROVIDER", "ollama"),
         model=os.environ.get("JARVIS_ROUTER_MODEL", ROUTER_MODEL),
+    ),
+    "planner": ModelConfig(
+        provider=os.environ.get("JARVIS_PLANNER_PROVIDER", "ollama"),
+        model=os.environ.get("JARVIS_PLANNER_MODEL", PLANNER_MODEL),
     ),
     "worker": ModelConfig(
         provider=os.environ.get("JARVIS_WORKER_PROVIDER", "ollama"),
@@ -40,7 +44,7 @@ def _load_persisted_configs() -> None:
         data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
-    for role in ("default", "router", "worker"):
+    for role in ("default", "router", "planner", "worker"):
         value = data.get(role)
         if isinstance(value, dict) and isinstance(value.get("provider"), str) and isinstance(value.get("model"), str):
             if value["provider"].strip() and value["model"].strip():
@@ -71,7 +75,7 @@ def get_model_config(role: str) -> ModelConfig:
 
 def set_model_config(role: str, *, provider: str, model: str) -> ModelConfig:
     """Update and persist a role configuration for subsequent requests."""
-    if role not in ("default", "router", "worker"):
+    if role not in ("default", "router", "planner", "worker"):
         raise ValueError(f"Unknown role '{role}'")
     if provider.strip().lower() not in ("ollama", "gemini", "anthropic", "openai"):
         raise ValueError("Unsupported provider. Choose ollama, gemini, anthropic, or openai.")

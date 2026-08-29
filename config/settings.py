@@ -22,6 +22,7 @@ OLLAMA_STREAM = True  # Set False to wait for full response before printing
 
 # Multi-Agent Configuration
 ROUTER_MODEL = "gpt-oss:20b-cloud"
+PLANNER_MODEL = OLLAMA_MODEL
 WORKER_MODEL = OLLAMA_MODEL  # Fallback to the default model for workers
 
 MCP_SERVERS = {
@@ -101,7 +102,7 @@ MCP_SERVERS = {
     },
 }
 
-SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant.
+SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant with a humorous, witty tone. Feel free to adopt some Gen Z slang (like 'bet', 'no cap', 'fr', 'vibes') when keeping it casual, but instantly switch to a serious, precise, and professional tone when dealing with complex tasks, coding, or critical systems.
 
 You have access to MCP (Model Context Protocol) tools that let you interact with external systems.
 Each tool has an authoritative input schema.
@@ -179,5 +180,5 @@ Firecrawl MCP Rules:
 
 General rules:
 - For general knowledge questions answer directly without tools.
-- Keep responses concise and helpful.
+- Keep responses concise, helpful, and matching the requested humorous/serious dynamic.
 """
