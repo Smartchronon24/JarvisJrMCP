@@ -14,6 +14,7 @@ import sys
 import time
 from contextlib import AsyncExitStack
 from pathlib import Path
+from typing import Optional
 
 # Ensure UTF-8 output on Windows so unicode characters in banners work correctly.
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
@@ -32,6 +33,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from app.llm import ProviderError, get_model_config, get_provider
 from app.tools import tool_registry
+from app.tools.discovery import DiscoveryRequest, tool_discovery
+from app.tools.execution import ToolExecutionGateway
 from app.tools.models import ToolSnapshot
 from app.tools.selector import selector
 
@@ -77,6 +80,14 @@ class JarvisAgent:
         ]
         self._exit_stack = AsyncExitStack()
         self._cancel_requested = False  # set True to stop current generation
+
+        # A8: Create execution gateway with optional bookkeeping callback
+        self.execution_gateway = ToolExecutionGateway(
+            tool_registry=tool_registry,
+            sessions=self.sessions,
+            tool_map=self.tool_map,
+            on_tool_executed=self._record_tool_usage,
+        )
 
     def request_cancel(self):
         """Signal the current streaming generation to stop after the next token."""
@@ -124,11 +135,17 @@ class JarvisAgent:
             (msg["content"] for msg in reversed(self.conversation) if msg["role"] == "user"),
             "",
         )
-        from app.tools.selector import selector
-        selected_names = selector.select(
-            last_user_msg,
-            candidates=tool_registry.get_tools(enabled_only=True, available_only=True)
+        discovery_request = DiscoveryRequest(
+            query=last_user_msg,
+            enabled_only=True,
+            available_only=True,
         )
+        discovery_result = tool_discovery.discover(tool_registry, discovery_request)
+        candidate_tools = discovery_result.candidates or tool_registry.get_tools(
+            enabled_only=True,
+            available_only=True,
+        )
+        selected_names = selector.select(last_user_msg, candidates=candidate_tools)
         # If selector could not narrow (empty list), fall back to capability‑filtered set.
         if not selected_names:
             # Fallback: use all enabled tools (same as earlier fallback).
@@ -152,6 +169,25 @@ class JarvisAgent:
         """Return a dict of {server_name: enabled} for all known servers."""
         all_servers = set(self.sessions.keys())
         return {srv: (srv in self.enabled_mcps) for srv in all_servers}
+
+    def resolve_capability_tools(self, capabilities: list[str]) -> tuple[set[str], list]:
+        """Compatibility helper mirroring the TR-2 orchestrator path."""
+        capability_registry = {
+            "web_research": {"mcps": ["exa", "tavily", "firecrawl"]},
+            "browser_automation": {"mcps": ["playwright"]},
+            "messaging": {"mcps": ["whatsapp"]},
+            "filesystem": {"mcps": ["filesystem"]},
+            "memory": {"mcps": ["memory"]},
+            "terminal": {"mcps": ["terminal"]},
+        }
+        resolved_servers: set[str] = set()
+        for capability in capabilities:
+            if capability in capability_registry:
+                resolved_servers.update(capability_registry[capability]["mcps"])
+
+        allowed_servers = resolved_servers.intersection(self.enabled_mcps)
+        eligible_meta = tool_registry.get_tools_for_servers(allowed_servers, enabled_only=True)
+        return allowed_servers, eligible_meta
 
     # ------------------------------------------------------------------
     # Setup
@@ -213,118 +249,77 @@ class JarvisAgent:
         await self._exit_stack.__aexit__(None, None, None)
 
     # ------------------------------------------------------------------
+    # Bookkeeping / Usage tracking
+    # ------------------------------------------------------------------
+
+    def _record_tool_usage(self, scoped_tool_name: str, real_tool_name: str, duration_ms: int, success: bool, error_info: Optional[str]) -> None:
+        """
+        Callback from ExecutionGateway to record tool usage for bookkeeping.
+        This isolates bookkeeping concerns from the gateway abstraction.
+        """
+        # Only record usage for specific providers that need it
+        server_name, _ = _parse_tool_key(scoped_tool_name)
+        if server_name not in ("exa", "tavily", "firecrawl"):
+            return
+
+        from app.bookkeeping.service import bookkeeping_service
+
+        # Try to extract actual usage count from result if available
+        # This would normally come from the execution result, but since
+        # we're in a callback with just the tool info, we use a default
+        actual_count = 1
+
+        bookkeeping_service.record_provider_usage(
+            provider=server_name,
+            operation=real_tool_name,
+            success=success,
+            request_count=actual_count,
+            estimated_count=1,
+            duration_ms=duration_ms,
+            error_info=error_info,
+            metadata=None,
+        )
+
+    # ------------------------------------------------------------------
     # Tool execution
     # ------------------------------------------------------------------
 
     async def execute_tool(self, scoped_name: str, arguments: dict) -> str:
-        """Route a tool call to the correct MCP server and return the result."""
-        mapped = self.tool_map.get(scoped_name)
-        if mapped is None:
-            return f"[Error] Unknown tool: {scoped_name}"
+        """
+        Execute a tool using the gateway abstraction.
 
-        server_name, mcp_tool = mapped
-        _, real_tool_name = _parse_tool_key(scoped_name)
+        The gateway handles:
+        - Tool identity resolution
+        - Enabled/available state checking
+        - Server connection validation
+        - Input validation
+        - MCP execution
+        - Result normalization
 
-        # --- MCP policy guard: refuse tools from disabled servers ---
-        if server_name not in self.enabled_mcps:
-            msg = f"[Policy] MCP server '{server_name}' is currently disabled."
-            print(f"  [MCP] {msg}")
-            return msg
-        
-        # --- Strict Validation ---
-        input_schema = (
-            getattr(mcp_tool, "input_schema", None)
-            or getattr(mcp_tool, "inputSchema", None)
-            or {}
-        )
-        required_fields = input_schema.get("required", [])
-        missing = [f for f in required_fields if f not in arguments]
-        if missing:
-            error_msg = f"[Validation Error] Missing required arguments for {real_tool_name}: {missing}"
-            print(f"  [MCP] Status  : VALIDATION FAILED")
-            print(f"  [MCP] Result  : {error_msg}")
-            return error_msg
-        # -------------------------
-
-        session = self.sessions.get(server_name)
-        if session is None:
-            return f"[Error] Server '{server_name}' is not connected."
+        This method adds console logging for observability.
+        """
+        # Parse the scoped name to extract server
+        server_name, real_tool_name = _parse_tool_key(scoped_name)
 
         print(f"  [MCP] Server  : {server_name}")
         print(f"  [MCP] Tool    : {real_tool_name}")
         print(f"  [MCP] Args    : {json.dumps(arguments, indent=2)}")
 
-        try:
-            t0 = time.time()
-            result = await session.call_tool(real_tool_name, arguments)
-            duration_ms = int((time.time() - t0) * 1000)
-            result_is_error = bool(
-                getattr(result, "is_error", None)
-                if hasattr(result, "is_error")
-                else getattr(result, "isError", False)
-            )
+        # Execute through the gateway
+        result = await self.execution_gateway.execute(scoped_name, arguments)
 
-            # Record provider usage for Exa, Tavily, Firecrawl
-            if server_name in ("exa", "tavily", "firecrawl"):
-                actual_count = 1
-                metadata_str = None
-                
-                # Attempt to extract actual usage from result if it's JSON structured
-                if not result_is_error and result.content:
-                    try:
-                        for item in result.content:
-                            if hasattr(item, "text"):
-                                try:
-                                    parsed = json.loads(item.text)
-                                    if isinstance(parsed, dict):
-                                        # Look for common usage fields
-                                        usage_data = parsed.get("usage") or parsed.get("metadata", {}).get("usage")
-                                        if isinstance(usage_data, dict) and "credits" in usage_data:
-                                            actual_count = int(usage_data["credits"])
-                                        elif "api_requests" in parsed:
-                                            actual_count = int(parsed["api_requests"])
-                                        metadata_str = json.dumps(parsed.get("metadata", {}))
-                                except json.JSONDecodeError:
-                                    pass
-                    except Exception:
-                        pass
+        # Log result status
+        if result.status == "success":
+            print(f"  [MCP] Status  : completed")
+            print(f"  [MCP] Result  : {result.content[:200]}{'...' if len(result.content) > 200 else ''}")
+        elif result.is_error:
+            print(f"  [MCP] Status  : {result.error_type or 'ERROR'}")
+            print(f"  [MCP] Result  : {result.content}")
+        else:
+            print(f"  [MCP] Status  : {result.status}")
+            print(f"  [MCP] Result  : {result.content}")
 
-                from app.bookkeeping.service import bookkeeping_service
-                bookkeeping_service.record_provider_usage(
-                    provider=server_name,
-                    operation=real_tool_name,
-                    success=not result_is_error,
-                    request_count=actual_count,
-                    estimated_count=1,
-                    duration_ms=duration_ms,
-                    error_info=str(result.content) if result_is_error else None,
-                    metadata=metadata_str,
-                )
-
-            # Extract a clean text result
-            if result_is_error:
-                content_str = f"[Tool error] {result.content}"
-                print(f"  [MCP] Status  : ERROR")
-                print(f"  [MCP] Result  : {content_str}")
-            elif result.content:
-                parts = []
-                for item in result.content:
-                    if hasattr(item, "text"):
-                        parts.append(item.text)
-                    else:
-                        parts.append(str(item))
-                content_str = "\n".join(parts)
-                print(f"  [MCP] Status  : completed")
-                print(f"  [MCP] Result  : {content_str[:200]}{'...' if len(content_str) > 200 else ''}")
-            else:
-                content_str = "(no content returned)"
-                print(f"  [MCP] Status  : completed (empty response)")
-
-            return content_str
-
-        except Exception as exc:
-            print(f"  [MCP] Status  : FAILED — {exc}")
-            return f"[Tool execution failed] {exc}"
+        return result.content
 
     # ------------------------------------------------------------------
     # LLM turn
@@ -600,7 +595,6 @@ class JarvisAgent:
             self.conversation.append({"role": "assistant", "content": reply})
             if emitted_assistant_start:
                 yield {"type": "assistant_complete", "agent": "jarvis"}
-            yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
             yield {"type": "request_complete", "agent": "jarvis"}
             print(f"\n[JARVIS] Fallback stream completed")
             print(f"[JARVIS] Final response generated")
@@ -610,7 +604,6 @@ class JarvisAgent:
         print(f"\n[JARVIS] Fallback stream completed (Max loops exceeded)")
         print("="*50 + "\n")
         yield {"type": "request_error", "agent": "jarvis", "error": "Max tool-call loops exceeded."}
-        yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
         yield {"type": "request_complete", "agent": "jarvis"}
 
 
@@ -644,7 +637,6 @@ class JarvisAgent:
         yield {"type": "request_start", "agent": "jarvis"}
 
         planner = Planner()
-        yield {"type": "pipeline_state", "stage": "planner", "status": "running", "model": planner.model}
         needs_plan = True
         if planning_mode == "OFF":
             needs_plan = False
@@ -656,32 +648,23 @@ class JarvisAgent:
         if not needs_plan:
             print(f"[PLANNER] Skipped (mode={planning_mode})")
             planner_result = None
-            yield {"type": "pipeline_state", "stage": "planner", "status": "skipped", "mode": planning_mode}
         else:
             try:
                 planner_result = planner.plan(user_message)
                 if planner_result:
-                    yield {"type": "pipeline_state", "stage": "planner", "status": "completed", "result": planner_result.to_dict()}
+                    print(f"[PLANNER] Goal: {planner_result.goal}")
+                    print(f"[PLANNER] Steps: {planner_result.steps}")
+                    print(f"[PLANNER] Hints: {planner_result.hints}")
                 else:
-                    yield {"type": "pipeline_state", "stage": "planner", "status": "failed"}
+                    print("[PLANNER] Plan returned no actionable steps.")
             except (ProviderError, ValueError) as exc:
                 print(f"[PLANNER] Failed: {exc}")
                 planner_result = None
-                yield {"type": "pipeline_state", "stage": "planner", "status": "failed", "error": str(exc)}
 
         # -----------------------------------------------------------------------
         # Medium 1: Run Router to classify the request
         # -----------------------------------------------------------------------
         router = Router()
-        yield {"type": "pipeline_state", "stage": "router", "status": "running", "model": router.model}
-        yield {
-            "type": "tool_call_start",
-            "agent": "router",
-            "id": "router_1",
-            "server": "router",
-            "tool": "analyze_request",
-            "arguments": {"message": user_message}
-        }
 
         print(f"\n[ROUTER] Starting")
         print(f"[ROUTER] Model: {router.model}")
@@ -695,22 +678,12 @@ class JarvisAgent:
         # Hard 4: Fallback — if Router failed, run single-agent with all enabled tools
         # -----------------------------------------------------------------------
         if decision is ROUTER_FAILED or decision.get("_router_failed"):
-            yield {"type": "pipeline_state", "stage": "router", "status": "failed"}
             print(f"\n[ROUTER] Decision: ROUTER_FAILED (fallback triggered)")
-            yield {
-                "type": "tool_call_error",
-                "agent": "router",
-                "id": "router_1",
-                "server": "router",
-                "tool": "analyze_request",
-                "error": "Router unavailable — falling back to single-agent execution."
-            }
             # Fall back to full single-agent execution (original behaviour)
             async for event in self._fallback_stream():
                 yield event
             return
 
-        yield {"type": "pipeline_state", "stage": "router", "status": "completed", "decision": decision}
         print(f"[ROUTER] Decision:")
         print(f"        task_type: {decision.get('task_type')}")
         print(f"        action: {decision.get('action')}")
@@ -719,19 +692,7 @@ class JarvisAgent:
         print(f"        worker_instruction: {decision.get('worker_instruction')}")
         print(f"        reason: {decision.get('reason')}")
 
-        yield {
-            "type": "tool_call_result",
-            "agent": "router",
-            "id": "router_1",
-            "server": "router",
-            "tool": "analyze_request",
-            "result": decision
-        }
-
         if decision.get("action") == "respond":
-            yield {"type": "pipeline_state", "stage": "tool_search", "status": "skipped"}
-            yield {"type": "pipeline_state", "stage": "tool_selection", "status": "skipped"}
-            yield {"type": "pipeline_state", "stage": "worker", "status": "skipped"}
             response_text = decision["response"]
             print("[ROUTER] Decision: direct_response")
             self.conversation.append({"role": "assistant", "content": response_text})
@@ -739,7 +700,6 @@ class JarvisAgent:
             if response_text:
                 yield {"type": "assistant_delta", "agent": "jarvis", "content": response_text}
             yield {"type": "assistant_complete", "agent": "jarvis"}
-            yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
             yield {"type": "request_complete", "agent": "jarvis"}
             return
 
@@ -760,7 +720,6 @@ class JarvisAgent:
                     resolved_servers.add(mcp)
 
         # TR-3: Create the immutable snapshot representing enabled tools for these servers
-        yield {"type": "pipeline_state", "stage": "tool_search", "status": "running"}
         search_query = decision.get("worker_instruction", user_message)
         if planner_result:
             search_query = " ".join([
@@ -775,8 +734,6 @@ class JarvisAgent:
             enabled_only=True,
             available_only=True,
         )
-        yield {"type": "pipeline_state", "stage": "tool_search", "status": "completed", "count": len(discovered_tools) if discovered_tools else 0}
-        yield {"type": "pipeline_state", "stage": "tool_selection", "status": "running"}
         if not discovered_tools:
             print("[TOOL SEARCH] No metadata matches; using capability candidates.")
             candidate_snapshot = tool_registry.create_snapshot(servers=resolved_servers)
@@ -805,8 +762,6 @@ class JarvisAgent:
             
         worker.tools = allowed_tools
         worker.allowed_tool_names = snapshot.tool_names
-        yield {"type": "pipeline_state", "stage": "tool_selection", "status": "completed", "tools": list(snapshot.tool_names)}
-        yield {"type": "pipeline_state", "stage": "worker", "status": "running", "model": worker.model}
 
         print(f"\n[ORCHESTRATOR] Processing router decision")
         print(f"[ORCHESTRATOR] Selected capabilities: {requested_caps}")
@@ -817,30 +772,6 @@ class JarvisAgent:
         for t_def in allowed_tools:
             print(f"        - {t_def['function']['name']}")
         print(f"[ORCHESTRATOR] Creating worker")
-
-        # -----------------------------------------------------------------------
-        # Medium 5: Announce Worker initialisation to Activity pane
-        # -----------------------------------------------------------------------
-        yield {
-            "type": "tool_call_start",
-            "agent": "worker",
-            "id": "worker_1",
-            "server": "worker",
-            "tool": "initialize",
-            "arguments": {
-                "task_type": decision.get("task_type"),
-                "instruction": decision.get("worker_instruction"),
-                "allowed_servers": sorted(resolved_servers)
-            }
-        }
-        yield {
-            "type": "tool_call_result",
-            "agent": "worker",
-            "id": "worker_1",
-            "server": "worker",
-            "tool": "initialize",
-            "result": f"Worker initialised with {len(allowed_tools)} tool(s) from {sorted(resolved_servers)}."
-        }
 
         # -----------------------------------------------------------------------
         # Medium 3: Build Worker with restricted tools
@@ -1069,7 +1000,6 @@ class JarvisAgent:
 
             if emitted_assistant_start:
                 yield {"type": "assistant_complete", "agent": "jarvis"}
-            yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
             yield {"type": "request_complete", "agent": "jarvis"}
             print(f"\n[WORKER] Completed")
             print(f"\n[JARVIS] Final response generated")
@@ -1081,7 +1011,6 @@ class JarvisAgent:
         print(f"\n[JARVIS] Final response generated with error")
         print("="*50 + "\n")
         yield {"type": "request_error", "agent": "jarvis", "error": "Max tool-call loops exceeded."}
-        yield {"type": "pipeline_state", "stage": "worker", "status": "completed"}
         yield {"type": "request_complete", "agent": "jarvis"}
 
 

@@ -19,6 +19,32 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+def _normalize_text(value: Any, *, default: str = "") -> str:
+    """Return a trimmed string while preserving empty values as valid metadata."""
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text if text else default
+
+
+_SERVER_CAPABILITY_MAP: dict[str, str] = {
+    "memory": "memory",
+    "filesystem": "filesystem",
+    "playwright": "browser",
+    "exa": "web_research",
+    "tavily": "web_research",
+    "firecrawl": "web_research",
+    "whatsapp": "communication",
+    "terminal": "terminal",
+}
+
+
+def _guess_capability(server_name: str | None) -> str:
+    if not server_name:
+        return "general"
+    return _SERVER_CAPABILITY_MAP.get(server_name, "general")
+
+
 @dataclass
 class ToolMetadata:
     """
@@ -67,6 +93,57 @@ class ToolMetadata:
     input_schema: dict[str, Any]     # raw MCP inputSchema — preserved verbatim
     enabled: bool = True
     available: bool = True
+
+    def __post_init__(self) -> None:
+        """Normalize the minimal metadata needed for consistent registry discovery."""
+        self.name = _normalize_text(self.name)
+        self.server = _normalize_text(self.server)
+        self.tool_name = _normalize_text(self.tool_name)
+        self.capability = _normalize_text(self.capability) or _guess_capability(self.server)
+        self.description = _normalize_text(self.description)
+
+        if not self.name:
+            if self.server and self.tool_name:
+                self.name = f"{self.server}__{self.tool_name}"
+            elif self.tool_name:
+                self.name = self.tool_name
+
+        if not self.tool_name and self.name and "__" in self.name:
+            _, self.tool_name = self.name.split("__", 1)
+
+        if not self.server and self.name and "__" in self.name:
+            self.server, _ = self.name.split("__", 1)
+
+        if not isinstance(self.input_schema, dict):
+            self.input_schema = {}
+
+    @property
+    def parameter_names(self) -> list[str]:
+        """Return parameter names from the schema's properties, if available."""
+        schema = self.input_schema or {}
+        if not isinstance(schema, dict):
+            return []
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return []
+        return [str(name).strip() for name in properties.keys() if str(name).strip()]
+
+    @property
+    def search_terms(self) -> list[str]:
+        """Return a lightweight, normalized searchable text blob."""
+        parts = [
+            self.name,
+            self.tool_name,
+            self.server,
+            self.capability,
+            self.description,
+            " ".join(self.parameter_names),
+        ]
+        return [term for term in " ".join(part for part in parts if part).split() if term]
+
+    @property
+    def search_text(self) -> str:
+        return " ".join(self.search_terms)
 
     # ------------------------------------------------------------------ #
     #  Convenience                                                         #

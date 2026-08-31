@@ -52,6 +52,7 @@ import logging
 from typing import Iterable, Union
 import re
 
+from app.tools.discovery import DiscoveryRequest, DiscoveryResult, DeterministicToolDiscovery
 from app.tools.models import ToolMetadata, ToolSnapshot
 
 logger = logging.getLogger("jarvis.tool_registry")
@@ -83,6 +84,55 @@ def _classify_server(server_name: str) -> str:
 # Registry
 # ---------------------------------------------------------------------------
 
+
+_STOP_WORDS = {
+    "a", "an", "and", "any", "are", "as", "at", "be", "by", "can",
+    "could", "did", "do", "does", "for", "from", "had", "has", "have",
+    "if", "in", "into", "is", "it", "its", "just", "my", "name", "not",
+    "of", "on", "or", "our", "should", "that", "the", "their", "them",
+    "then", "there", "these", "they", "this", "those", "to", "tool", "up",
+    "was", "we", "were", "what", "when", "where", "which", "who", "why",
+    "will", "with", "would", "you", "your",
+}
+
+
+def _normalize_token(token: str) -> str:
+    """Normalize common word variants to keep matching deterministic and lightweight."""
+    value = token.lower().strip()
+    if not value:
+        return value
+    if value.endswith("ies") and len(value) > 4:
+        return value[:-3] + "y"
+    if value.endswith("sses") and len(value) > 5:
+        return value[:-2]
+    if value.endswith("s") and not value.endswith("ss") and len(value) > 3:
+        return value[:-1]
+    return value
+
+
+def _tokenize(value: str | None) -> set[str]:
+    """Return a deterministic token set for text matching."""
+    if not value:
+        return set()
+    tokens = {
+        _normalize_token(token)
+        for token in re.findall(r"[a-z0-9_]+", value.lower())
+        if token and token not in _STOP_WORDS
+    }
+    return {token for token in tokens if token}
+
+
+def _matches_term(candidate: str | None, target: str | None) -> bool:
+    """Match a field against a target using normalized substring semantics."""
+    if target is None:
+        return True
+    candidate_text = (candidate or "").lower()
+    target_text = (target or "").lower().strip()
+    if not target_text:
+        return True
+    return target_text in candidate_text
+
+
 class ToolRegistry:
     """
     In-memory catalog of all discovered MCP tools.
@@ -90,6 +140,7 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolMetadata] = {}
+        self._discovery = DeterministicToolDiscovery()
         logger.info("ToolRegistry initialised (empty).")
 
     # ------------------------------------------------------------------
@@ -116,6 +167,7 @@ class ToolRegistry:
         *,
         available: bool = True,
         enabled: bool = True,
+        capability: Optional[str] = None,
     ) -> ToolMetadata:
         """
         Convenience method: build a ``ToolMetadata`` from a raw MCP tool
@@ -132,7 +184,8 @@ class ToolRegistry:
         )
 
         scoped_name = f"{server_name}__{raw_name}"
-        capability = _classify_server(server_name)
+        if capability is None:
+            capability = _classify_server(server_name)
 
         meta = ToolMetadata(
             name=scoped_name,
@@ -233,8 +286,21 @@ class ToolRegistry:
         available_only : bool
             If True, exclude tools whose server is not available.
         """
-        srv_set = {servers} if isinstance(servers, str) else (set(servers) if servers is not None else None)
-        cap_set = {capabilities} if isinstance(capabilities, str) else (set(capabilities) if capabilities is not None else None)
+        if isinstance(servers, str):
+            srv_set = {servers}
+        elif servers is not None:
+            server_values = tuple(servers)
+            srv_set = set(server_values) if server_values else None
+        else:
+            srv_set = None
+
+        if isinstance(capabilities, str):
+            cap_set = {capabilities}
+        elif capabilities is not None:
+            cap_values = tuple(capabilities)
+            cap_set = set(cap_values) if cap_values else None
+        else:
+            cap_set = None
 
         results: list[ToolMetadata] = []
         for meta in self._tools.values():
@@ -253,17 +319,104 @@ class ToolRegistry:
         """Backward compatibility alias for get_tools."""
         return self.get_tools(servers=server, capabilities=capability, enabled_only=enabled_only, available_only=available_only)
 
-    def get_tools_for_server(self, server: str, *, enabled_only: bool = True) -> list[ToolMetadata]:
-        """Return all tools belonging to the given server name."""
-        return self.get_tools(servers=server, enabled_only=enabled_only)
+    def __len__(self) -> int:
+        """Return the number of registered tools."""
+        return len(self._tools)
 
-    def get_tools_for_capability(self, capability: str, *, enabled_only: bool = True) -> list[ToolMetadata]:
+    def __iter__(self):
+        return iter(self._tools.values())
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and name in self._tools
+
+    def get_tools_for_server(self, server: str, *, enabled_only: bool = True, available_only: bool = False) -> list[ToolMetadata]:
+        """Return all tools belonging to the given server name."""
+        return self.get_tools(servers=server, enabled_only=enabled_only, available_only=available_only)
+
+    def get_tools_for_servers(
+        self,
+        servers: Iterable[str] | str | None,
+        *,
+        enabled_only: bool = True,
+        available_only: bool = False,
+    ) -> list[ToolMetadata]:
+        """Return all tools belonging to the given server set."""
+        if servers is None:
+            return []
+        if isinstance(servers, str):
+            return self.get_tools(servers=servers, enabled_only=enabled_only, available_only=available_only)
+        server_values = tuple(servers)
+        if not server_values:
+            return []
+        return self.get_tools(servers=server_values, enabled_only=enabled_only, available_only=available_only)
+
+    def get_tools_for_capability(self, capability: str, *, enabled_only: bool = True, available_only: bool = False) -> list[ToolMetadata]:
         """Return all tools that belong to the given capability bucket."""
-        return self.get_tools(capabilities=capability, enabled_only=enabled_only)
+        return self.get_tools(capabilities=capability, enabled_only=enabled_only, available_only=available_only)
+
+    def get_tools_for_capabilities(
+        self,
+        capabilities: Iterable[str] | str | None,
+        *,
+        enabled_only: bool = True,
+        available_only: bool = False,
+    ) -> list[ToolMetadata]:
+        """Return all tools belonging to the given capability set."""
+        if capabilities is None:
+            return []
+        if isinstance(capabilities, str):
+            return self.get_tools(capabilities=capabilities, enabled_only=enabled_only, available_only=available_only)
+        capability_values = tuple(capabilities)
+        if not capability_values:
+            return []
+        return self.get_tools(capabilities=capability_values, enabled_only=enabled_only, available_only=available_only)
+
+    def get_enabled_tool_names(
+        self,
+        *,
+        server: str | None = None,
+        capability: str | None = None,
+    ) -> set[str]:
+        """Return the enabled tool names for the requested server/capability."""
+        query_servers = server
+        query_capabilities = capability
+        return {
+            meta.name
+            for meta in self.get_tools(
+                servers=query_servers,
+                capabilities=query_capabilities,
+                enabled_only=True,
+            )
+        }
 
     # ------------------------------------------------------------------
     # Discovery Foundation
     # ------------------------------------------------------------------
+
+    def discover_tools(
+        self,
+        query: str | None = None,
+        *,
+        capabilities: Iterable[str] | None = None,
+        servers: Iterable[str] | None = None,
+        tool_name: str | None = None,
+        description: str | None = None,
+        parameter_name: str | None = None,
+        enabled_only: bool = True,
+        available_only: bool = True,
+    ) -> list[ToolMetadata]:
+        """Discover candidate tools through the current provider-neutral discovery strategy."""
+        request = DiscoveryRequest(
+            query=query or "",
+            capabilities=tuple(capabilities) if capabilities is not None else (),
+            servers=tuple(servers) if servers is not None else (),
+            tool_name=tool_name,
+            description=description,
+            parameter_name=parameter_name,
+            enabled_only=enabled_only,
+            available_only=available_only,
+        )
+        return self.discover(request).candidates
 
     def search_tools(
         self,
@@ -273,46 +426,35 @@ class ToolRegistry:
         servers: Iterable[str] | None = None,
         enabled_only: bool = True,
         available_only: bool = True,
+        tool_name: str | None = None,
+        description: str | None = None,
+        parameter_name: str | None = None,
     ) -> list[ToolMetadata]:
-        """
-        Discover registry tools whose metadata contains terms from ``query``.
-        """
-        candidates = self.get_tools(
-            servers=servers,
+        """Backward-compatible query API for deterministic registry discovery."""
+        if not query and not any((capabilities, servers, tool_name, description, parameter_name)):
+            return []
+        return self.discover_tools(
+            query=query,
             capabilities=capabilities,
+            servers=servers,
+            tool_name=tool_name,
+            description=description,
+            parameter_name=parameter_name,
             enabled_only=enabled_only,
             available_only=available_only,
         )
-        query_terms = set(re.findall(r"[a-z0-9]+", query.lower()))
 
-        matches: list[tuple[int, ToolMetadata]] = []
-        for meta in candidates:
-            searchable = " ".join(
-                (
-                    meta.name,
-                    meta.tool_name,
-                    meta.server,
-                    meta.capability,
-                    meta.description,
-                    " ".join(
-                        str(name)
-                        for name in (meta.input_schema or {}).get("properties", {})
-                    ),
-                )
-            ).lower()
-            overlap = query_terms.intersection(
-                set(re.findall(r"[a-z0-9]+", searchable))
-            )
-            if overlap:
-                matches.append((len(overlap), meta))
+    def set_discovery_strategy(self, strategy: object) -> None:
+        """Replace the discovery implementation used by this registry."""
+        self._discovery = strategy
 
-        matches.sort(key=lambda item: (-item[0], item[1].name))
-        logger.info(
-            "[TOOL SEARCH] Query: %s | Candidates: %d",
-            query,
-            len(matches),
-        )
-        return [meta for _, meta in matches]
+    def discover(self, request: DiscoveryRequest) -> DiscoveryResult:
+        """Run the current discovery strategy against this registry."""
+        return self._discovery.discover(self, request)
+
+    def find_tools(self, *args, **kwargs) -> list[ToolMetadata]:
+        """Alias for discover_tools for clearer discovery semantics."""
+        return self.discover_tools(*args, **kwargs)
 
     # ------------------------------------------------------------------
     # Snapshot
@@ -358,4 +500,5 @@ class ToolRegistry:
             "disabled_tools": sum(1 for m in self._tools.values() if not m.enabled),
             "unavailable_tools": sum(1 for m in self._tools.values() if not m.available),
             "servers": {srv: sorted(tools) for srv, tools in sorted(servers.items())},
+            "capabilities": {cap: sorted(tools) for cap, tools in sorted(capabilities.items())},
         }

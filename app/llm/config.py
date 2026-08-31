@@ -28,6 +28,15 @@ _MODEL_CONFIGS: dict[str, ModelConfig] = {
         provider=os.environ.get("JARVIS_WORKER_PROVIDER", "ollama"),
         model=os.environ.get("JARVIS_WORKER_MODEL", OLLAMA_MODEL),
     ),
+    # selector: the LLM used to intelligently narrow candidate tools → final Worker toolset.
+    # Defaults to the same provider/model as worker — override via env if a faster/cheaper
+    # model is preferred for this lightweight classification task.
+    "selector": ModelConfig(
+        provider=os.environ.get("JARVIS_SELECTOR_PROVIDER",
+                                os.environ.get("JARVIS_WORKER_PROVIDER", "ollama")),
+        model=os.environ.get("JARVIS_SELECTOR_MODEL",
+                             os.environ.get("JARVIS_WORKER_MODEL", OLLAMA_MODEL)),
+    ),
     "default": ModelConfig(
         provider=os.environ.get("JARVIS_DEFAULT_PROVIDER", "ollama"),
         model=os.environ.get("JARVIS_DEFAULT_MODEL", OLLAMA_MODEL),
@@ -44,7 +53,7 @@ def _load_persisted_configs() -> None:
         data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
-    for role in ("default", "router", "planner", "worker"):
+    for role in ("default", "router", "planner", "worker", "selector"):
         value = data.get(role)
         if isinstance(value, dict) and isinstance(value.get("provider"), str) and isinstance(value.get("model"), str):
             if value["provider"].strip() and value["model"].strip():
@@ -75,7 +84,7 @@ def get_model_config(role: str) -> ModelConfig:
 
 def set_model_config(role: str, *, provider: str, model: str) -> ModelConfig:
     """Update and persist a role configuration for subsequent requests."""
-    if role not in ("default", "router", "planner", "worker"):
+    if role not in ("default", "router", "planner", "worker", "selector"):
         raise ValueError(f"Unknown role '{role}'")
     if provider.strip().lower() not in ("ollama", "gemini", "anthropic", "openai"):
         raise ValueError("Unsupported provider. Choose ollama, gemini, anthropic, or openai.")

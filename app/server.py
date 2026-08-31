@@ -166,6 +166,25 @@ async def post_chat(request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _should_emit_event_to_ui(event):
+    """Keep internal orchestration details in CLI/server logs, not the user-facing SSE stream."""
+    if not isinstance(event, dict):
+        return True
+
+    event_type = event.get("type")
+    if event_type == "pipeline_state":
+        return False
+
+    # Router and worker lifecycle events are operational diagnostics, not actual tool calls.
+    if event_type in {"tool_call_start", "tool_call_result", "tool_call_error"}:
+        agent_name = event.get("agent")
+        server_name = event.get("server")
+        if agent_name in {"router", "worker", "planner"} or server_name in {"router", "worker", "planner"}:
+            return False
+
+    return True
+
+
 async def stream_chat(request):
     """
     SSE streaming endpoint.
@@ -205,6 +224,8 @@ async def stream_chat(request):
     async def event_generator():
         try:
             async for event in agent.chat_stream(message, planning_mode=planning_mode):
+                if not _should_emit_event_to_ui(event):
+                    continue
                 yield {"data": json.dumps(event)}
         except Exception as exc:
             yield {"data": json.dumps({"type": "request_error", "error": str(exc)})}
