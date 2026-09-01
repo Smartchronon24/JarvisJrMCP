@@ -25,7 +25,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
+import time
 from typing import Optional
 
 from app.runtime.adapters.claude import ClaudeAdapter
@@ -82,6 +84,7 @@ class RuntimeServer:
         self.port = port
         self._server = None
         self._active_sessions: dict[str, RuntimeSessionOrchestrator] = {}
+        self._process_registry: dict[str, object] = {}
         self._shutdown = asyncio.Event()
         self._cleanup_tasks: set[asyncio.Task] = set()
         self.bridge = RuntimeWebSocketBridge(session_factory=self._handle_start_request)
@@ -123,6 +126,7 @@ class RuntimeServer:
                 handle = self.bridge._registry.get(orchestrator.run_id)
                 if handle and handle.process:
                     await handle.cancel()
+                    await handle.process.close()
             except Exception as exc:
                 logger.warning("Error terminating session %s: %s", orchestrator.run_id, exc)
 
@@ -241,6 +245,7 @@ class RuntimeServer:
 
         # Track session
         self._active_sessions[run_id] = orchestrator
+        self._process_registry[run_id] = process
 
         # Start cleanup monitor
         cleanup_task = asyncio.create_task(
@@ -313,9 +318,22 @@ class RuntimeServer:
         Monitor orchestrator for terminal state and clean up when complete.
         """
         try:
-            # Wait for terminal state
-            while not orchestrator.state_machine.is_terminal():
-                await asyncio.sleep(0.1)
+            timeout_value = os.environ.get("JARVIS_RUNTIME_TIMEOUT_SECONDS", "120")
+            try:
+                timeout_seconds = max(1.0, float(timeout_value))
+            except ValueError:
+                timeout_seconds = 120.0
+
+            async def wait_for_terminal() -> None:
+                while not orchestrator.state_machine.is_terminal():
+                    await asyncio.sleep(0.1)
+
+            try:
+                await asyncio.wait_for(wait_for_terminal(), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                reason = f"Runtime timed out after {timeout_seconds:g} seconds"
+                logger.warning("Runtime timeout for run_id=%s", run_id)
+                await process.terminate(reason=reason)
 
             logger.info("Session reached terminal state: run_id=%s, state=%s",
                        run_id,
@@ -328,11 +346,31 @@ class RuntimeServer:
             self.bridge.detach_session(run_id)
 
             # Clean up
+            await process.close()
             self._active_sessions.pop(run_id, None)
+            self._process_registry.pop(run_id, None)
             logger.info("Session cleaned up: run_id=%s", run_id)
 
         except Exception as exc:
             logger.error("Error monitoring session %s: %s", run_id, exc)
+            try:
+                await process.close()
+            finally:
+                self._active_sessions.pop(run_id, None)
+                self._process_registry.pop(run_id, None)
+
+    def get_process_status(self, run_id: str) -> Optional[dict]:
+        """Return diagnostic process ownership information for a live session."""
+        process = self._process_registry.get(run_id)
+        if process is None:
+            return None
+        return {
+            "run_id": run_id,
+            "pid": process.pid,
+            "alive": process.returncode is None,
+            "started_at_ms": process.started_at_ms,
+            "state": process.state.value,
+        }
 
     async def get_session_status(self, run_id: str) -> Optional[dict]:
         """Return current status of a session, or None if not found."""

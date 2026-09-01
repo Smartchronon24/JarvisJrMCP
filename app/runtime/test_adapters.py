@@ -90,7 +90,7 @@ def test_copilot_adapter():
     assert adapter.get_identity() == FrameworkIdentity.COPILOT
     cmd = adapter.build_command(config)
     
-    assert cmd == ["copilot", "--model", "gpt-4", "--allow-all-tools", "--prompt", "test prompt"]
+    assert cmd == ["copilot", "--model", "gpt-4", "--allow-all-tools", "-p", "test prompt"]
     
     env = adapter.build_environment(config)
     assert env.get("COPILOT_GITHUB_TOKEN") == "ghp_12345"

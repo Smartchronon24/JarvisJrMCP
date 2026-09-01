@@ -58,6 +58,10 @@ class RuntimeProcess:
         self._watch_task: Optional[asyncio.Task[None]] = None
         self._event_callback: Optional[Callable[[RuntimeEvent], None | Awaitable[None]]] = None
         self._interrupted = False
+        self._failure_reason: Optional[str] = None
+        self._cleanup_lock = asyncio.Lock()
+        self._cleaned_up = False
+        self.started_at_ms = self._now_ms()
 
     @property
     def pid(self) -> Optional[int]:
@@ -177,31 +181,58 @@ class RuntimeProcess:
             return 0
         return self.process.returncode
 
-    async def terminate(self, timeout: float = 5.0) -> int:
-        if self.process.returncode is not None:
-            return self.process.returncode
-        self._interrupted = True
-        self.state = RuntimeProcessState.CANCELLED
-        try:
-            self.process.terminate()
-            await asyncio.wait_for(self.process.wait(), timeout=timeout)
-        except ProcessLookupError:
-            pass
-        except asyncio.TimeoutError:
-            self.process.kill()
-            await self.process.wait()
-        finally:
-            await self._emit(ProcessInterruptedEvent(self._now_ms()))
-            self._completion.set()
-        return self.process.returncode if self.process.returncode is not None else 0
+    async def terminate(self, timeout: float = 5.0, reason: Optional[str] = None) -> int:
+        async with self._cleanup_lock:
+            if self.process.returncode is not None:
+                return self.process.returncode
+            self._interrupted = True
+            self._failure_reason = reason
+            self.state = RuntimeProcessState.FAILED if reason else RuntimeProcessState.CANCELLED
+            try:
+                if os.name == "nt" and self.process.pid:
+                    # cmd.exe wrappers do not reliably terminate their node child
+                    # when only the parent receives CTRL/terminate.
+                    subprocess.run(
+                        ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
+                        capture_output=True,
+                        check=False,
+                    )
+                else:
+                    self.process.terminate()
+                await asyncio.wait_for(self.process.wait(), timeout=timeout)
+            except ProcessLookupError:
+                pass
+            except asyncio.TimeoutError:
+                self.process.kill()
+                await self.process.wait()
+            finally:
+                if reason:
+                    await self._emit(ProcessFailedEvent(
+                        self._now_ms(),
+                        self.process.returncode if self.process.returncode is not None else -1,
+                        reason,
+                    ))
+                else:
+                    await self._emit(ProcessInterruptedEvent(self._now_ms()))
+                self._completion.set()
+            return self.process.returncode if self.process.returncode is not None else 0
 
     async def close(self) -> None:
+        async with self._cleanup_lock:
+            if self._cleaned_up:
+                return
+            self._cleaned_up = True
+
+        if self.process.returncode is None:
+            await self.terminate()
         if self.process.stdin is not None and not self.process.stdin.is_closing():
             self.process.stdin.close()
-        if self.process.stdout is not None:
-            self.process.stdout.close()
-        if self.process.stderr is not None:
-            self.process.stderr.close()
+        for stream in (self.process.stdout, self.process.stderr):
+            if stream is not None:
+                stream.feed_eof()
+        tasks = [task for task in (self._stdout_task, self._stderr_task) if task is not None]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         await self.wait()
 
 
@@ -322,17 +353,18 @@ class RuntimeProcessExecutor:
                 *command,
                 cwd=config.working_directory,
                 env=merged_env,
-                stdin=asyncio.subprocess.PIPE,
+                # A prompt-bearing non-interactive CLI must see a true null
+                # stdin; otherwise Codex may append an input block and wait.
+                stdin=(
+                    asyncio.subprocess.PIPE
+                    if config.interactive or not config.prompt
+                    else asyncio.subprocess.DEVNULL
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
         except OSError as exc:
             raise RuntimeExecutionError(f"Failed to start process: {exc}") from exc
-
-        if not config.interactive and process.stdin is not None:
-            # The prompt is passed on the command line for non-interactive
-            # adapters. Closing stdin prevents CLIs from waiting for EOF.
-            process.stdin.close()
 
         runtime = RuntimeProcess(adapter, config, process)
         if event_callback is not None:

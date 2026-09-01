@@ -88,8 +88,7 @@ async def test_non_interactive_runtime_closes_stdin_after_prompt_is_configured()
             extra={"script": "print('prompt completed')"},
         ),
     )
-    assert proc.process.stdin is not None
-    assert proc.process.stdin.is_closing()
+    assert proc.process.stdin is None
     await proc.wait()
     assert proc.state == RuntimeProcessState.COMPLETED
 

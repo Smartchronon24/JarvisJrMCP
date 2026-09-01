@@ -48,6 +48,7 @@
                 dashModel: doc.getElementById('dashModel'),
                 dashProvider: doc.getElementById('dashProvider'),
                 dashRunId: doc.getElementById('dashRunId'),
+                dashPid: doc.getElementById('dashPid'),
                 dashElapsed: doc.getElementById('dashElapsed'),
                 metricOutput: doc.getElementById('metricOutput'),
                 metricErrors: doc.getElementById('metricErrors'),
@@ -334,6 +335,7 @@
             this._updateValue(ui.dashModel, '—');
             this._updateValue(ui.dashProvider, '—');
             this._updateValue(ui.dashRunId, '—');
+            this._updateValue(ui.dashPid, '—');
             this._updateValue(ui.dashElapsed, '—');
             ui.metricOutput.textContent = '0';
             ui.metricErrors.textContent = '0';
@@ -441,6 +443,10 @@
             switch (eventType) {
                 case 'process_started':
                     this._setRuntimeInfoFromEvent(event);
+                    if (event.data && event.data.pid) {
+                        this._updateValue(ui.dashPid, String(event.data.pid));
+                        this._writeTerminal(`[PROCESS] PID ${event.data.pid}`);
+                    }
                     this._startTimeMs = event.timestamp_ms || this._startTimeMs || Date.now();
                     this.state.executionState = 'starting';
                     this._updateValue(ui.dashState, this.state.executionState);
@@ -484,7 +490,7 @@
                 case 'output': {
                     const stream = (event.data && event.data.stream) || 'stdout';
                     const text = (event.data && event.data.text) ? event.data.text : '';
-                    this._writeTerminal(text);
+                    this._writeTerminal(stream === 'stderr' ? `[STDERR] ${text}` : text);
                     if (stream === 'stderr') {
                         const errorCount = Number(ui.metricErrors.textContent || '0');
                         ui.metricErrors.textContent = String(errorCount + 1);
@@ -523,6 +529,8 @@
                     this._endTimeMs = event.timestamp_ms || Date.now();
                     this._updateValue(ui.dashState, 'completed');
                     this._setStatusBox('completed', 'Execution completed');
+                    this._writeTerminal(`[RUNTIME] Process exited: ${event.data && event.data.exit_code !== undefined ? event.data.exit_code : 0}`);
+                    this._writeTerminal('[CLEANUP] Process completed');
                     this._setControlVisibility(false, false, false, false);
                     this._setStartControlsDisabled(false);
                     if (event.data && event.data.exit_code !== undefined) {
@@ -538,6 +546,7 @@
                     this._endTimeMs = event.timestamp_ms || Date.now();
                     this._updateValue(ui.dashState, 'failed');
                     this._setStatusBox('failed', 'Execution failed');
+                    this._writeTerminal(`[RUNTIME] Process failed: ${event.data && event.data.reason ? event.data.reason : 'unknown error'}`);
                     this._setControlVisibility(false, false, true, false);
                     this._setStartControlsDisabled(false);
                     if (event.data && event.data.exit_code !== undefined) {
@@ -557,6 +566,7 @@
                     this._endTimeMs = event.timestamp_ms || Date.now();
                     this._updateValue(ui.dashState, 'cancelled');
                     this._setStatusBox('failed', 'Execution cancelled');
+                    this._writeTerminal('[CLEANUP] Process terminated');
                     this._setControlVisibility(false, false, false, false);
                     this._setStartControlsDisabled(false);
                     this._updateElapsedDisplay();
@@ -565,6 +575,7 @@
                 case 'error':
                     this.state.executionState = 'failed';
                     this.handleError((event.data && event.data.message) || 'Runtime error');
+                    this._writeTerminal(`[RUNTIME] ${ (event.data && event.data.message) || 'Runtime error' }`);
                     this._setStatusBox('failed', 'Runtime error');
                     this._setControlVisibility(false, false, false, true);
                     this._setStartControlsDisabled(false);

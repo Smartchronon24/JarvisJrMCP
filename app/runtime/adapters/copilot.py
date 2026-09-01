@@ -17,12 +17,13 @@ class CopilotAdapter(FrameworkAdapter):
             cmd.extend(["--model", config.model_name])
             
         if not config.interactive:
-            # Copilot CLI uses -p/--prompt for non-interactive.
+            # Use the short prompt flag supported consistently by the
+            # installed Copilot CLI and its Windows launcher.
             # --allow-all-tools is required per CLI help: "required for non-interactive mode"
             # Without it Copilot may pause mid-run for tool permission prompts.
             cmd.append("--allow-all-tools")
             if config.prompt:
-                cmd.extend(["--prompt", config.prompt])
+                cmd.extend(["-p", config.prompt])
         else:
             if config.prompt:
                 cmd.append(config.prompt)
