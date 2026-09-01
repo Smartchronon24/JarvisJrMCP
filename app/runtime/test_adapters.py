@@ -33,6 +33,15 @@ def test_claude_adapter():
     env = adapter.build_environment(config)
     assert env == {}
 
+    ollama_config = RuntimeConfig(
+        executable_path="claude",
+        prompt="test prompt",
+        model_name="gpt-oss:120b-cloud",
+        environment={"ANTHROPIC_BASE_URL": "http://localhost:11434"},
+    )
+    ollama_env = adapter.build_environment(ollama_config)
+    assert ollama_env["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] == "1"
+
 def test_codex_adapter():
     adapter = CodexAdapter()
     config = RuntimeConfig(
@@ -81,7 +90,7 @@ def test_copilot_adapter():
     assert adapter.get_identity() == FrameworkIdentity.COPILOT
     cmd = adapter.build_command(config)
     
-    assert cmd == ["copilot", "--model", "gpt-4", "--prompt", "test prompt"]
+    assert cmd == ["copilot", "--model", "gpt-4", "--allow-all-tools", "--prompt", "test prompt"]
     
     env = adapter.build_environment(config)
     assert env.get("COPILOT_GITHUB_TOKEN") == "ghp_12345"

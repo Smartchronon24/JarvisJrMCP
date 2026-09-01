@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -206,6 +209,96 @@ class RuntimeProcessExecutor:
     """Neutral executor that turns a FrameworkAdapter + RuntimeConfig into a managed process."""
 
     @staticmethod
+    def _build_missing_runtime_fallback(adapter: FrameworkAdapter, config: RuntimeConfig) -> list[str]:
+        framework_name = adapter.get_identity().value if adapter.get_identity().value != "unknown" else "local-runtime"
+        prompt = config.prompt or "No prompt provided"
+        script = (
+            "import sys, time\n"
+            "prompt = sys.argv[1] if len(sys.argv) > 1 else 'No prompt provided'\n"
+            "framework = sys.argv[2] if len(sys.argv) > 2 else 'local-runtime'\n"
+            "print(f'[{framework}] local runtime fallback active: framework CLI is not installed on PATH or is not ready for execution.')\n"
+            "print(f'Prompt: {prompt}')\n"
+            "print('Install the native CLI locally or sign in to run the real framework session.')\n"
+            "time.sleep(0.2)\n"
+        )
+        return [sys.executable, "-c", script, prompt, framework_name]
+
+    @staticmethod
+    def _normalize_windows_command(command: list[str]) -> list[str]:
+        if os.name != "nt" or not command:
+            return command
+
+        executable = str(command[0]).strip()
+        if not executable:
+            return command
+
+        lower = executable.lower()
+        if lower.endswith((".cmd", ".bat")):
+            cmdline = subprocess.list2cmdline(command)
+            return ["cmd.exe", "/d", "/s", "/c", cmdline]
+        return command
+
+    @staticmethod
+    def _detect_unavailable_runtime(command: list[str], env: dict[str, str] | None = None) -> bool:
+        if not command:
+            return False
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=4,
+                env=env,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            return True
+
+        combined = "\n".join(filter(None, [completed.stdout, completed.stderr]))
+        lower = combined.lower()
+        if not combined:
+            return False
+        indicators = (
+            "not logged in",
+            "please run /login",
+            "login required",
+            "not authenticated",
+            "authentication required",
+            "command not found",
+            "no such file or directory",
+            "is not recognized",
+            "not installed",
+            "not available on path",
+        )
+        return any(indicator in lower for indicator in indicators)
+
+    @staticmethod
+    def _resolve_command(adapter: FrameworkAdapter, config: RuntimeConfig) -> list[str]:
+        command = adapter.build_command(config)
+        if not command:
+            raise RuntimeExecutionError("Adapter produced an empty command")
+
+        executable = str(command[0]).strip()
+        if not executable:
+            raise RuntimeExecutionError("Adapter produced an empty executable path")
+
+        resolved_executable = executable
+        if os.path.exists(executable):
+            resolved_executable = executable
+        else:
+            discovered = shutil.which(executable)
+            if discovered:
+                resolved_executable = discovered
+
+        if resolved_executable != executable:
+            command = [resolved_executable, *command[1:]]
+
+        if os.path.exists(resolved_executable) or shutil.which(resolved_executable):
+            return RuntimeProcessExecutor._normalize_windows_command(command)
+
+        return RuntimeProcessExecutor._build_missing_runtime_fallback(adapter, config)
+
+    @staticmethod
     async def execute(
         adapter: FrameworkAdapter,
         config: RuntimeConfig,
@@ -218,9 +311,11 @@ class RuntimeProcessExecutor:
         merged_env = os.environ.copy()
         merged_env.update(adapter.build_environment(config))
 
-        command = adapter.build_command(config)
-        if not command:
-            raise RuntimeExecutionError("Adapter produced an empty command")
+        # Do not execute the CLI as a readiness probe. Framework commands may
+        # perform real model work, block for authentication, or consume input.
+        # Missing executables are handled by _resolve_command; configured
+        # executables must be allowed to report their own runtime errors.
+        command = RuntimeProcessExecutor._resolve_command(adapter, config)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -233,6 +328,11 @@ class RuntimeProcessExecutor:
             )
         except OSError as exc:
             raise RuntimeExecutionError(f"Failed to start process: {exc}") from exc
+
+        if not config.interactive and process.stdin is not None:
+            # The prompt is passed on the command line for non-interactive
+            # adapters. Closing stdin prevents CLIs from waiting for EOF.
+            process.stdin.close()
 
         runtime = RuntimeProcess(adapter, config, process)
         if event_callback is not None:

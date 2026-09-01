@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claudex Studio — Runtime Observer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.4.0/css/xterm.css" />
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="claudex-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="title">Claudex Studio</h1>
+                <div class="connection-status">
+                    <span class="status-indicator" id="connectionStatus"></span>
+                    <span class="status-text" id="statusText">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Layout: Dashboard (40%) + Terminal (60%) -->
+        <div class="main-layout">
+            <!-- Left Panel: Dashboard (40%) -->
+            <div class="dashboard-panel">
+                <!-- Run Information Section -->
+                <section class="dashboard-section">
+                    <h2>Execution</h2>
+                    <div class="info-grid">
+                        <div class="info-row">
+                            <label>State:</label>
+                            <span id="dashState" class="value">idle</span>
+                        </div>
+                        <div class="info-row">
+                            <label>Framework:</label>
+                            <span id="dashFramework" class="value">—</span>
+                        </div>
+                        <div class="info-row">
+                            <label>Model:</label>
+                            <span id="dashModel" class="value">—</span>
+                        </div>
+                        <div class="info-row">
+                            <label>Provider:</label>
+                            <span id="dashProvider" class="value">—</span>
+                        </div>
+                        <div class="info-row">
+                            <label>Run ID:</label>
+                            <span id="dashRunId" class="value code">—</span>
+                        </div>
+                        <div class="info-row">
+                            <label>Elapsed:</label>
+                            <span id="dashElapsed" class="value">—</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Metrics Section -->
+                <section class="dashboard-section">
+                    <h2>Metrics</h2>
+                    <div class="metrics-grid">
+                        <div class="metric">
+                            <div class="metric-label">Output Lines</div>
+                            <div class="metric-value" id="metricOutput">0</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Errors</div>
+                            <div class="metric-value" id="metricErrors">0</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Exit Code</div>
+                            <div class="metric-value" id="metricExit">—</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Status Section -->
+                <section class="dashboard-section">
+                    <h2>Status</h2>
+                    <div class="status-box">
+                        <div id="statusBox" class="status-idle">
+                            No execution running
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Session Start -->
+                <section class="dashboard-section">
+                    <h2>Start Session</h2>
+                    <div class="action-area session-form">
+                        <select id="frameworkInput" class="input-field">
+                            <option value="claude">Claude</option>
+                            <option value="codex">Codex</option>
+                            <option value="copilot">GitHub Copilot</option>
+                        </select>
+                        <input id="modelInput" type="text" class="input-field" placeholder="Model name (e.g. gpt-oss:120b-cloud)">
+                        <input id="providerInput" type="text" class="input-field" placeholder="Provider (optional)">
+                        <input id="workingDirectoryInput" type="text" class="input-field" placeholder="Working directory (optional)">
+                        <textarea id="promptInput" class="input-field" rows="4" placeholder="Prompt or instruction..."></textarea>
+                        <button id="startSessionBtn" class="btn btn-primary">Start Session</button>
+                    </div>
+                </section>
+
+                <!-- Action Buttons -->
+                <section class="dashboard-section">
+                    <div class="action-area">
+                        <input 
+                            type="text" 
+                            id="subscribeInput" 
+                            placeholder="Run ID to subscribe to..." 
+                            class="input-field"
+                        >
+                        <button id="subscribeBtn" class="btn btn-primary">Subscribe</button>
+                        <button id="disconnectBtn" class="btn btn-secondary" style="display: none;">Disconnect</button>
+                    </div>
+                </section>
+
+                <!-- Input/Approval Controls -->
+                <section class="dashboard-section" id="inputSection" style="display: none;">
+                    <h2>Input Required</h2>
+                    <div class="input-control">
+                        <input 
+                            type="text" 
+                            id="userInput" 
+                            placeholder="Enter input..." 
+                            class="input-field"
+                        >
+                        <button id="sendInputBtn" class="btn btn-primary">Send</button>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" id="approvalSection" style="display: none;">
+                    <h2>Approval Required</h2>
+                    <div class="approval-control">
+                        <button id="approveBtn" class="btn btn-success">Approve</button>
+                        <button id="rejectBtn" class="btn btn-danger">Reject</button>
+                    </div>
+                </section>
+
+                <!-- Cancel Button -->
+                <section class="dashboard-section" id="cancelSection" style="display: none;">
+                    <button id="cancelBtn" class="btn btn-warning">Cancel Execution</button>
+                </section>
+
+                <!-- Error Display -->
+                <section class="dashboard-section" id="errorSection" style="display: none;">
+                    <h2>Error</h2>
+                    <div class="error-box">
+                        <span id="errorMessage"></span>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right Panel: Terminal (60%) -->
+            <div class="terminal-panel">
+                <div class="terminal-toolbar">
+                    <button id="clearTerminalBtn" class="btn btn-secondary btn-small">Clear terminal</button>
+                </div>
+                <div id="terminal" class="terminal-container">
+                    <pre id="terminalFallback" class="terminal-fallback" aria-live="polite"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load xterm.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.4.0/lib/xterm.js" defer></script>
+    <!-- Load application code -->
+    <script src="websocket-client.js" defer></script>
+    <script src="app.js" defer></script>
+</body>
+</html>

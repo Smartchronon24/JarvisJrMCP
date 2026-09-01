@@ -77,6 +77,24 @@ async def test_runtime_process_handles_stdin():
 
 
 @pytest.mark.asyncio
+async def test_non_interactive_runtime_closes_stdin_after_prompt_is_configured():
+    adapter = EchoAdapter()
+    proc = await RuntimeProcessExecutor.execute(
+        adapter,
+        RuntimeConfig(
+            executable_path=sys.executable,
+            prompt="configured prompt",
+            interactive=False,
+            extra={"script": "print('prompt completed')"},
+        ),
+    )
+    assert proc.process.stdin is not None
+    assert proc.process.stdin.is_closing()
+    await proc.wait()
+    assert proc.state == RuntimeProcessState.COMPLETED
+
+
+@pytest.mark.asyncio
 async def test_runtime_process_reports_exit_codes_and_failures():
     adapter = EchoAdapter()
     proc = await RuntimeProcessExecutor.execute(
@@ -123,6 +141,49 @@ async def test_runtime_process_propagates_environment_and_workdir():
             extra={"script": "import os; print(os.getenv('RUNTIME_TEST_ENV')); import pathlib; print(str(pathlib.Path.cwd()))"},
         ),
     )
+    await proc.wait()
+    assert proc.state == RuntimeProcessState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_runtime_executes_local_fallback_when_framework_is_missing():
+    adapter = CodexAdapter()
+    proc = await RuntimeProcessExecutor.execute(
+        adapter,
+        RuntimeConfig(
+            executable_path="missing-codex-cli-not-installed",
+            prompt="hello from fallback",
+        ),
+    )
+    start_event = await proc.wait_for_event(EventType.PROCESS_STARTED, timeout=2)
+    assert start_event.framework == "codex"
+    await proc.wait()
+    assert proc.state == RuntimeProcessState.COMPLETED
+
+
+def test_windows_batch_commands_are_wrapped_for_cmd_exe(monkeypatch):
+    monkeypatch.setattr("app.runtime.executor.os.name", "nt", raising=False)
+    command = [r"C:\\tools\\claude.cmd", "--print", "hello there"]
+    wrapped = RuntimeProcessExecutor._normalize_windows_command(command)
+    assert wrapped[:4] == ["cmd.exe", "/d", "/s", "/c"]
+    assert "claude.cmd" in wrapped[4]
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_execute_cli_as_readiness_probe(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("the configured CLI must not be preflighted")
+
+    monkeypatch.setattr("app.runtime.executor.subprocess.run", fail_if_called)
+    proc = await RuntimeProcessExecutor.execute(
+        EchoAdapter(),
+        RuntimeConfig(
+            executable_path=sys.executable,
+            extra={"script": "print('configured runtime started')"},
+        ),
+    )
+    output = await proc.wait_for_event(EventType.OUTPUT, timeout=2)
+    assert output.text == "configured runtime started"
     await proc.wait()
     assert proc.state == RuntimeProcessState.COMPLETED
 

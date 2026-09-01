@@ -32,4 +32,8 @@ class ClaudeAdapter(FrameworkAdapter):
         env = dict(config.environment)
         # Claude heavily relies on ANTHROPIC_API_KEY if auth isn't in settings
         # The adapter boundary doesn't enforce key presence, but ensures env passes through
+        if config.model_name and ":" in config.model_name:
+            # Claude Code does not know metadata for many Ollama model IDs.
+            # Let the configured endpoint decide whether the model is usable.
+            env.setdefault("CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT", "1")
         return env

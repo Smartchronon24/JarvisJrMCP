@@ -1,0 +1,428 @@
+/* ========================================================================
+   Claudex Studio — Minimal Styles
+   40% Dashboard + 60% Terminal Layout
+   ======================================================================== */
+
+:root {
+    --primary-color: #3b82f6;
+    --success-color: #10b981;
+    --danger-color: #ef4444;
+    --warning-color: #f59e0b;
+    --bg-primary: #1f2937;
+    --bg-secondary: #111827;
+    --text-primary: #f3f4f6;
+    --text-secondary: #d1d5db;
+    --border-color: #374151;
+    --terminal-bg: #0f172a;
+}
+
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+/* Container and Layout */
+.claudex-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+}
+
+.header {
+    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+    padding: 1rem;
+    flex-shrink: 0;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #6b7280;
+    animation: pulse 2s infinite;
+}
+
+.status-indicator.connected {
+    background-color: var(--success-color);
+}
+
+.status-text {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Main Layout: 40/60 Split */
+.main-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.dashboard-panel {
+    width: 40%;
+    background-color: var(--bg-primary);
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+    padding: 1rem;
+    flex-shrink: 0;
+}
+
+.terminal-panel {
+    width: 60%;
+    background-color: var(--terminal-bg);
+    overflow: hidden;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.terminal-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.5rem 0.75rem 0;
+    background: rgba(15, 23, 42, 0.95);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Dashboard Sections */
+.dashboard-section {
+    margin-bottom: 1.5rem;
+}
+
+.dashboard-section h2 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    letter-spacing: 0.05em;
+}
+
+.info-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.875rem;
+}
+
+.info-row label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.info-row .value {
+    color: var(--text-primary);
+    font-weight: 600;
+    text-align: right;
+}
+
+.info-row .value.code {
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 50%;
+}
+
+/* Metrics Grid */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.metric {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.75rem;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.metric-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+
+.metric-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+/* Status Box */
+.status-box {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.75rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.status-idle {
+    border-left: 3px solid #6b7280;
+}
+
+.status-running {
+    border-left: 3px solid var(--primary-color);
+    color: var(--primary-color);
+}
+
+.status-waiting {
+    border-left: 3px solid var(--warning-color);
+    color: var(--warning-color);
+}
+
+.status-completed {
+    border-left: 3px solid var(--success-color);
+    color: var(--success-color);
+}
+
+.status-failed {
+    border-left: 3px solid var(--danger-color);
+    color: var(--danger-color);
+}
+
+/* Inputs and Buttons */
+.input-field {
+    width: 100%;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+}
+
+.input-field:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.action-area {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.session-form {
+    gap: 0.75rem;
+}
+
+.session-form textarea.input-field {
+    resize: vertical;
+    min-height: 110px;
+}
+
+.input-control {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.input-control input {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.approval-control {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Buttons */
+.btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn:hover {
+    opacity: 0.9;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    color: white;
+    width: 100%;
+}
+
+.btn-primary:hover {
+    background-color: #2563eb;
+}
+
+.btn-secondary {
+    background-color: #6b7280;
+    color: white;
+    width: 100%;
+}
+
+.btn-secondary:hover {
+    background-color: #4b5563;
+}
+
+.btn-success {
+    background-color: var(--success-color);
+    color: white;
+    flex: 1;
+}
+
+.btn-success:hover {
+    background-color: #059669;
+}
+
+.btn-danger {
+    background-color: var(--danger-color);
+    color: white;
+    flex: 1;
+}
+
+.btn-danger:hover {
+    background-color: #dc2626;
+}
+
+.btn-warning {
+    background-color: var(--warning-color);
+    color: white;
+    width: 100%;
+}
+
+.btn-warning:hover {
+    background-color: #d97706;
+}
+
+/* Error Box */
+.error-box {
+    background-color: #7f1d1d;
+    border: 1px solid #dc2626;
+    border-radius: 4px;
+    padding: 0.75rem;
+    font-size: 0.875rem;
+    color: #fecaca;
+}
+
+/* Terminal Container */
+.terminal-container {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    flex: 1;
+}
+
+.terminal-fallback {
+    height: 100%;
+    margin: 0;
+    padding: 1rem;
+    overflow: auto;
+    color: var(--text-primary);
+    font: 12px/1.5 'Monaco', 'Courier New', monospace;
+    white-space: pre-wrap;
+}
+
+.btn-small {
+    width: auto;
+    min-width: 120px;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.75rem;
+}
+
+/* xterm.js Customization */
+.terminal-container :global(.xterm) {
+    font-family: 'Monaco', 'Courier New', monospace !important;
+    font-size: 12px !important;
+    padding: 1rem !important;
+}
+
+.terminal-container :global(.xterm-cursor-block) {
+    background-color: var(--primary-color) !important;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4b5563;
+}
+
+/* Responsive (minimal) */
+@media (max-width: 700px) {
+    .main-layout {
+        flex-direction: column;
+    }
+
+    .dashboard-panel {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        max-height: 40vh;
+    }
+
+    .terminal-panel {
+        width: 100%;
+        min-height: 60vh;
+    }
+}

@@ -91,7 +91,11 @@ async def lifespan(app_obj):
 # ---------------------------------------------------------------------------
 
 async def root_redirect(request):
-    return RedirectResponse(url="/html/index.html")
+    return RedirectResponse(url="/claudex-studio/")
+
+
+async def legacy_ui_redirect(request):
+    return RedirectResponse(url="/claudex-studio/")
 
 
 async def get_messages(request):
@@ -466,10 +470,16 @@ async def get_usage_llm_recent(request):
 # ---------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-FRONTEND_DIR = BASE_DIR / "frontend" / "src"
+LEGACY_FRONTEND_DIR = BASE_DIR / "frontend" / "src"
+CLAUDEX_STUDIO_DIR = BASE_DIR / "claudex-studio"
 
 routes = [
     Route("/", endpoint=root_redirect),
+    Route("/index.html", endpoint=root_redirect),
+    Route("/html", endpoint=legacy_ui_redirect),
+    Route("/html/{path:path}", endpoint=legacy_ui_redirect),
+    Route("/legacy", endpoint=legacy_ui_redirect),
+    Route("/legacy/{path:path}", endpoint=legacy_ui_redirect),
     Route("/api/messages", endpoint=get_messages, methods=["GET"]),
     Route("/api/status", endpoint=get_status, methods=["GET"]),
     Route("/api/chat", endpoint=post_chat, methods=["POST"]),
@@ -491,8 +501,9 @@ routes = [
     Route("/api/usage/providers/{provider}/period", endpoint=get_usage_providers_period, methods=["GET"]),
     Route("/api/usage/llm", endpoint=get_usage_llm, methods=["GET"]),
     Route("/api/usage/llm/recent", endpoint=get_usage_llm_recent, methods=["GET"]),
-    Mount("/", app=StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static"),
+    Mount("/claudex-studio", app=StaticFiles(directory=str(CLAUDEX_STUDIO_DIR), html=True), name="claudex-studio"),
 ]
+
 
 
 app = Starlette(routes=routes, lifespan=lifespan)
