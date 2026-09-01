@@ -106,10 +106,16 @@ class ClaudexWebSocketClient {
             return;
         }
 
+        const prompt = options.prompt || '';
+        
+        // B16 diagnostic: prompt integrity at frontend
+        const promptHash = this._hashString(prompt).substring(0, 16);
+        console.log(`[B16-BOUNDARY-FRONTEND] prompt_hash=${promptHash}, prompt_len=${prompt.length}, timestamp=${Date.now()}`);
+
         const payload = {
             type: 'start',
             framework: options.framework || 'claude',
-            prompt: options.prompt || '',
+            prompt: prompt,
             model: options.model || null,
             provider: options.provider || null,
             endpoint_url: options.endpoint_url || null,
@@ -118,7 +124,7 @@ class ClaudexWebSocketClient {
             environment: options.environment || {},
             data: {
                 framework: options.framework || 'claude',
-                prompt: options.prompt || '',
+                prompt: prompt,
                 model: options.model || null,
                 provider: options.provider || null,
                 endpoint_url: options.endpoint_url || null,
@@ -135,13 +141,29 @@ class ClaudexWebSocketClient {
 
         try {
             this._pendingStart = true;
-            this.ws.send(JSON.stringify(payload));
+            const payloadStr = JSON.stringify(payload);
+            const payloadHash = this._hashString(payloadStr).substring(0, 16);
+            console.log(`[B16-BOUNDARY-TRANSPORT] payload_hash=${payloadHash}, payload_len=${payloadStr.length}`);
+            this.ws.send(payloadStr);
             console.log('Started runtime session for framework:', payload.framework);
         } catch (err) {
             console.error('Failed to send start message:', err);
             this._pendingStart = false;
             if (this.onError) this.onError('Failed to start session');
         }
+    }
+    
+    /**
+     * Simple string hash for diagnostics (not cryptographic)
+     */
+    _hashString(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash |= 0; // Convert to 32bit integer
+        }
+        return Math.abs(hash).toString(16).padStart(16, '0');
     }
 
     /**

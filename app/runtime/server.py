@@ -28,6 +28,9 @@ import logging
 import os
 import sys
 import time
+import json
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from app.runtime.adapters.claude import ClaudeAdapter
@@ -38,6 +41,7 @@ from app.runtime.executor import RuntimeProcessExecutor, RuntimeExecutionError
 from app.runtime.runtime import RuntimeSessionOrchestrator, RuntimeExecutionState
 from app.runtime.events import ErrorEvent
 from app.runtime.websocket import RuntimeWebSocketBridge
+from app.tools.gateway import JarvisToolGateway
 
 logger = logging.getLogger("jarvis.b8.server")
 
@@ -210,6 +214,19 @@ class RuntimeServer:
             # Try to use framework name as executable (e.g., "claude", "codex")
             executable_path = framework.lower()
 
+        if working_directory is None:
+            working_directory = os.getcwd()
+
+        gateway_token = None
+        gateway_config_path = None
+        extra: dict[str, str] = {}
+        if framework.lower() == "claude":
+            gateway_token, gateway_config_path = self._create_claude_gateway_config()
+            if gateway_config_path:
+                extra["jarvis_mcp_config"] = gateway_config_path
+                extra["jarvis_gateway_token"] = gateway_token or ""
+                logger.info("Claude gateway configured for new session")
+
         # Create RuntimeConfig
         config = RuntimeConfig(
             executable_path=executable_path,
@@ -220,6 +237,7 @@ class RuntimeServer:
             working_directory=working_directory,
             environment=environment or {},
             interactive=False,
+            extra=extra,
         )
 
         # Create B6 orchestrator
@@ -237,11 +255,17 @@ class RuntimeServer:
         try:
             process = await RuntimeProcessExecutor.execute(adapter, config)
         except RuntimeExecutionError as exc:
+            self._cleanup_gateway(config)
             logger.error("Failed to spawn process for run_id=%s: %s", run_id, exc)
             raise
 
         # Attach to B7 bridge
-        await self._attach_session_to_bridge(orchestrator, process)
+        try:
+            await self._attach_session_to_bridge(orchestrator, process)
+        except Exception:
+            await process.close()
+            self._cleanup_gateway(config)
+            raise
 
         # Track session
         self._active_sessions[run_id] = orchestrator
@@ -256,6 +280,64 @@ class RuntimeServer:
 
         logger.info("Session created successfully: run_id=%s", run_id)
         return orchestrator, run_id
+
+    @staticmethod
+    def _create_claude_gateway_config() -> tuple[Optional[str], Optional[str]]:
+        """Create a disposable Claude MCP config when Jarvis is initialized."""
+        try:
+            from app.server import agent, gateway_transport
+        except ImportError:
+            return None, None
+        if agent is None:
+            return None, None
+
+        gateway = JarvisToolGateway(
+            agent.execution_gateway.tool_registry,
+            agent.execution_gateway,
+        )
+        session = gateway_transport.create_session(gateway)
+        token = str(session["token"])
+        bridge = Path(__file__).resolve().parents[2] / "tools" / "mcp_gateway_stdio.py"
+        config = {
+            "mcpServers": {
+                "jarvis": {
+                    "command": sys.executable,
+                    "args": [str(bridge)],
+                    "env": {
+                        "JARVIS_GATEWAY_URL": "http://127.0.0.1:8000/api/jarvis/gateway",
+                        "JARVIS_GATEWAY_TOKEN": token,
+                    },
+                }
+            }
+        }
+        handle = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".json",
+            prefix="jarvis-claude-mcp-",
+            delete=False,
+        )
+        try:
+            json.dump(config, handle, ensure_ascii=True)
+        finally:
+            handle.close()
+        return token, handle.name
+
+    @staticmethod
+    def _cleanup_gateway(config: RuntimeConfig) -> None:
+        token = config.extra.get("jarvis_gateway_token")
+        if token:
+            try:
+                from app.server import gateway_transport
+                gateway_transport.revoke_session(token)
+            except ImportError:
+                logger.warning("Unable to revoke Claude gateway session")
+        config_path = config.extra.get("jarvis_mcp_config")
+        if config_path:
+            try:
+                Path(config_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Unable to remove Claude gateway config")
 
     async def _attach_session_to_bridge(
         self,
@@ -347,6 +429,7 @@ class RuntimeServer:
 
             # Clean up
             await process.close()
+            self._cleanup_gateway(orchestrator.config)
             self._active_sessions.pop(run_id, None)
             self._process_registry.pop(run_id, None)
             logger.info("Session cleaned up: run_id=%s", run_id)
@@ -355,6 +438,7 @@ class RuntimeServer:
             logger.error("Error monitoring session %s: %s", run_id, exc)
             try:
                 await process.close()
+                self._cleanup_gateway(orchestrator.config)
             finally:
                 self._active_sessions.pop(run_id, None)
                 self._process_registry.pop(run_id, None)

@@ -19,6 +19,11 @@ from app.tools.discovery import (
     ToolDiscovery,
     tool_discovery,
 )
+from app.tools.gateway import (
+    GatewaySearchRequest,
+    GatewaySearchResponse,
+    JarvisToolGateway,
+)
 
 # Global singleton — the single canonical tool catalog for Jarvis.
 tool_registry: ToolRegistry = ToolRegistry()
@@ -33,4 +38,7 @@ __all__ = [
     "DeterministicToolDiscovery",
     "tool_discovery",
     "tool_registry",
+    "GatewaySearchRequest",
+    "GatewaySearchResponse",
+    "JarvisToolGateway",
 ]

@@ -11,12 +11,15 @@ from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 import uvicorn
+from app.tools.gateway import JarvisToolGateway
+from app.tools.transport import GatewayTransport
 
 # Import our JarvisAgent and validation
 from app.agents.ollama_agent import JarvisAgent, validate_provider
 
 agent = None
 startup_error = None
+gateway_transport = GatewayTransport()
 
 
 async def startup():
@@ -42,6 +45,49 @@ async def shutdown():
     global agent
     if agent:
         await agent.shutdown()
+    gateway_transport.clear_sessions()
+
+
+def _gateway_token(request):
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _local_request(request) -> bool:
+    client = request.client
+    return client is None or client.host in {"127.0.0.1", "::1", "localhost"}
+
+
+async def create_gateway_session(request):
+    """Create a short-lived local worker credential for the active Jarvis agent."""
+    if not _local_request(request):
+        return JSONResponse({"error": "gateway is local-only"}, status_code=403)
+    if not agent:
+        return JSONResponse({"error": "Agent not initialized"}, status_code=503)
+    session = gateway_transport.create_session(
+        JarvisToolGateway(agent.execution_gateway.tool_registry, agent.execution_gateway)
+    )
+    return JSONResponse(session)
+
+
+async def gateway_request(request):
+    """Dispatch exactly one validated search or execute gateway operation."""
+    if not _local_request(request):
+        return JSONResponse({"error": "gateway is local-only"}, status_code=403)
+    token = _gateway_token(request)
+    if token is None:
+        return JSONResponse({"error": "Bearer gateway token required"}, status_code=401)
+    try:
+        payload = await request.json()
+        result = await gateway_transport.dispatch(token, payload)
+        return JSONResponse(result)
+    except PermissionError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=401)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
 async def get_mcp_settings(request):
@@ -485,6 +531,8 @@ routes = [
     Route("/api/chat", endpoint=post_chat, methods=["POST"]),
     Route("/api/chat/stream", endpoint=stream_chat, methods=["POST"]),
     Route("/api/chat/cancel", endpoint=cancel_chat, methods=["POST"]),
+    Route("/api/jarvis/gateway/session", endpoint=create_gateway_session, methods=["POST"]),
+    Route("/api/jarvis/gateway", endpoint=gateway_request, methods=["POST"]),
     Route("/api/settings/mcp", endpoint=get_mcp_settings, methods=["GET"]),
     Route("/api/settings/mcp", endpoint=post_mcp_settings, methods=["POST"]),
     # LLM Provider & Model Configuration (Phase C.1)

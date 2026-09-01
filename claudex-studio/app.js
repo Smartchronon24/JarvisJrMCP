@@ -221,6 +221,10 @@
                         this.handleError('Enter a prompt before starting a runtime session');
                         return;
                     }
+                    
+                    // B16 diagnostic: prompt integrity at UI capture
+                    const promptHash = this._hashString(prompt).substring(0, 16);
+                    console.log(`[B16-BOUNDARY-UIINPUT] prompt_hash=${promptHash}, prompt_len=${prompt.length}, prompt="${prompt}"`);
 
                     this._startRequestPending = true;
                     this.state.executionState = 'starting';
@@ -247,6 +251,7 @@
                     });
                 });
             }
+
 
             if (ui.subscribeBtn) {
                 ui.subscribeBtn.addEventListener('click', () => {
@@ -612,6 +617,19 @@
 
         connect() {
             this.client.connect();
+        }
+        
+        /**
+         * Simple string hash for diagnostics (not cryptographic)
+         */
+        _hashString(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash |= 0; // Convert to 32bit integer
+            }
+            return Math.abs(hash).toString(16).padStart(16, '0');
         }
     }
 

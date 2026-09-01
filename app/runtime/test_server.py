@@ -253,6 +253,23 @@ class TestCreateSessionFlow:
             assert config.working_directory == "/tmp/project"
 
     @pytest.mark.asyncio
+    async def test_create_session_defaults_to_process_cwd(self):
+        server = RuntimeServer()
+
+        with patch("app.runtime.server.RuntimeProcessExecutor.execute") as mock_execute:
+            mock_process = MockRuntimeProcess()
+            mock_execute.return_value = mock_process
+
+            orchestrator, run_id = await server.create_session(
+                framework="claude",
+                prompt="test",
+            )
+
+            call_args = mock_execute.call_args
+            config = call_args[0][1]
+            assert config.working_directory == os.getcwd()
+
+    @pytest.mark.asyncio
     async def test_create_session_environment(self):
         server = RuntimeServer()
 

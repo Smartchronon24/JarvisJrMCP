@@ -336,6 +336,8 @@ class RuntimeProcessExecutor:
         *,
         event_callback: Optional[Callable[[RuntimeEvent], None | Awaitable[None]]] = None,
     ) -> RuntimeProcess:
+        import hashlib
+        
         if not config.executable_path:
             raise RuntimeExecutionError("RuntimeConfig.executable_path is required")
 
@@ -347,6 +349,24 @@ class RuntimeProcessExecutor:
         # Missing executables are handled by _resolve_command; configured
         # executables must be allowed to report their own runtime errors.
         command = RuntimeProcessExecutor._resolve_command(adapter, config)
+        
+        # B16 diagnostic: final command and environment
+        if config.prompt:
+            prompt_hash = hashlib.sha256(config.prompt.encode('utf-8')).hexdigest()[:16]
+            import logging
+            logger = logging.getLogger("jarvis.b5.executor")
+            logger.info(
+                "[B16-BOUNDARY-EXECUTOR] prompt_hash=%s, cmd=%s, cwd=%s, env_keys=%s",
+                prompt_hash, command, config.working_directory, sorted(merged_env.keys())
+            )
+            # Log Anthropic-specific env for Ollama verification
+            anthropic_keys = {k: '<REDACTED>' if 'TOKEN' in k or 'KEY' in k else v
+                              for k, v in merged_env.items() if 'ANTHROPIC' in k or 'CLAUDE' in k}
+            if anthropic_keys:
+                logger.info(
+                    "[B16-BOUNDARY-EXECUTOR] anthropic_env=%s",
+                    anthropic_keys
+                )
 
         try:
             process = await asyncio.create_subprocess_exec(

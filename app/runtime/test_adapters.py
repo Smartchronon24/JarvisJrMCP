@@ -33,6 +33,20 @@ def test_claude_adapter():
     env = adapter.build_environment(config)
     assert env == {}
 
+    gateway_config = RuntimeConfig(
+        executable_path="claude",
+        prompt="test prompt",
+        extra={"jarvis_mcp_config": "C:\\temp\\jarvis.json"},
+    )
+    assert ClaudeAdapter().build_command(gateway_config) == [
+        "claude",
+        "--mcp-config",
+        "C:\\temp\\jarvis.json",
+        "--strict-mcp-config",
+        "--print",
+        "test prompt",
+    ]
+
     ollama_config = RuntimeConfig(
         executable_path="claude",
         prompt="test prompt",
@@ -41,6 +55,18 @@ def test_claude_adapter():
     )
     ollama_env = adapter.build_environment(ollama_config)
     assert ollama_env["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] == "1"
+    assert ollama_env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+
+    ollama_provider_config = RuntimeConfig(
+        executable_path="claude",
+        prompt="test prompt",
+        model_name="gpt-oss:120b-cloud",
+        provider_name="ollama",
+        endpoint_url="http://localhost:11434",
+    )
+    ollama_provider_env = adapter.build_environment(ollama_provider_config)
+    assert ollama_provider_env["ANTHROPIC_AUTH_TOKEN"] == "ollama"
+    assert ollama_provider_env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
 
 def test_codex_adapter():
     adapter = CodexAdapter()
