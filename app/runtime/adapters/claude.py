@@ -21,11 +21,21 @@ class ClaudeAdapter(FrameworkAdapter):
         gateway_config = config.extra.get("jarvis_mcp_config")
         if gateway_config:
             cmd.extend(["--mcp-config", gateway_config, "--strict-mcp-config"])
+            # Claude's `--bare` mode explicitly ignores --mcp-config. Allow
+            # only the two session-scoped Jarvis tools instead of prompting.
+            cmd.extend([
+                "--allowed-tools",
+                "mcp__jarvis__jarvis_search",
+                "mcp__jarvis__jarvis_execute",
+            ])
             
         if not config.interactive:
-            # Keep each print invocation isolated from Claude's implicit project
-            # plugins, hooks, memory, prefetches, and persisted sessions.
-            cmd.extend(["--bare", "--no-session-persistence"])
+            # `--bare` skips MCP configuration in the installed Claude CLI,
+            # so MCP-enabled sessions use strict config plus no persistence.
+            # Sessions without MCP retain the stronger bare isolation mode.
+            if not gateway_config:
+                cmd.append("--bare")
+            cmd.append("--no-session-persistence")
             # Claude Code uses --print for non-interactive output
             cmd.append("--print")
             if config.prompt:

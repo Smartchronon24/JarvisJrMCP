@@ -23,13 +23,11 @@ logic is delegated to B4 adapters.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
+import subprocess
 import sys
 import time
-import json
-import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -41,6 +39,7 @@ from app.runtime.executor import RuntimeProcessExecutor, RuntimeExecutionError
 from app.runtime.runtime import RuntimeSessionOrchestrator, RuntimeExecutionState
 from app.runtime.events import ErrorEvent
 from app.runtime.websocket import RuntimeWebSocketBridge
+from app.runtime.jarvis_mcp import JarvisMCPConfig
 from app.tools.gateway import JarvisToolGateway
 
 logger = logging.getLogger("jarvis.b8.server")
@@ -220,12 +219,57 @@ class RuntimeServer:
         gateway_token = None
         gateway_config_path = None
         extra: dict[str, str] = {}
-        if framework.lower() == "claude":
-            gateway_token, gateway_config_path = self._create_claude_gateway_config()
-            if gateway_config_path:
-                extra["jarvis_mcp_config"] = gateway_config_path
-                extra["jarvis_gateway_token"] = gateway_token or ""
-                logger.info("Claude gateway configured for new session")
+        if framework.lower() in {"claude", "codex", "copilot"}:
+            # Expose the canonical Tool Registry through the session-scoped JarvisMCP gateway
+            # for every supported runtime, while preserving framework-specific adapter logic.
+            try:
+                from app.server import agent, gateway_transport
+                if agent is not None:
+                    mcp_config = JarvisMCPConfig(
+                        gateway_transport,
+                        JarvisToolGateway(
+                            agent.execution_gateway.tool_registry,
+                            agent.execution_gateway,
+                        ),
+                    )
+                    gateway_token, gateway_config_path = mcp_config.create_config()
+                    if gateway_config_path:
+                        extra["jarvis_mcp_config"] = gateway_config_path
+                        extra["jarvis_gateway_token"] = gateway_token or ""
+                        extra["jarvis_mcp_generator"] = "jarvis_mcp"
+                        logger.info("JarvisMCP configured for %s", framework)
+            except ImportError:
+                logger.warning("Could not import agent/gateway_transport for JarvisMCP")
+            except Exception as exc:
+                logger.warning("Failed to configure JarvisMCP for %s: %s", framework, exc)
+
+        if framework.lower() == "codex" and gateway_token and gateway_config_path:
+            try:
+                bridge = Path(__file__).resolve().parents[1] / "tools" / "mcp_gateway_stdio.py"
+                codex_cmd = [
+                    "codex",
+                    "mcp",
+                    "add",
+                    "jarvis",
+                    "--env",
+                    "JARVIS_GATEWAY_URL=http://127.0.0.1:8000/api/jarvis/gateway",
+                    "--env",
+                    f"JARVIS_GATEWAY_TOKEN={gateway_token}",
+                    "--",
+                    sys.executable,
+                    str(bridge),
+                ]
+                subprocess.run(
+                    codex_cmd,
+                    cwd=working_directory,
+                    env=os.environ.copy(),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                logger.info("Registered Jarvis MCP server with Codex using native `codex mcp add`")
+            except Exception as exc:
+                logger.warning("Failed to register Jarvis MCP server with Codex: %s", exc)
 
         # Create RuntimeConfig
         config = RuntimeConfig(
@@ -282,62 +326,27 @@ class RuntimeServer:
         return orchestrator, run_id
 
     @staticmethod
-    def _create_claude_gateway_config() -> tuple[Optional[str], Optional[str]]:
-        """Create a disposable Claude MCP config when Jarvis is initialized."""
-        try:
-            from app.server import agent, gateway_transport
-        except ImportError:
-            return None, None
-        if agent is None:
-            return None, None
-
-        gateway = JarvisToolGateway(
-            agent.execution_gateway.tool_registry,
-            agent.execution_gateway,
-        )
-        session = gateway_transport.create_session(gateway)
-        token = str(session["token"])
-        bridge = Path(__file__).resolve().parents[2] / "tools" / "mcp_gateway_stdio.py"
-        config = {
-            "mcpServers": {
-                "jarvis": {
-                    "command": sys.executable,
-                    "args": [str(bridge)],
-                    "env": {
-                        "JARVIS_GATEWAY_URL": "http://127.0.0.1:8000/api/jarvis/gateway",
-                        "JARVIS_GATEWAY_TOKEN": token,
-                    },
-                }
-            }
-        }
-        handle = tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            suffix=".json",
-            prefix="jarvis-claude-mcp-",
-            delete=False,
-        )
-        try:
-            json.dump(config, handle, ensure_ascii=True)
-        finally:
-            handle.close()
-        return token, handle.name
-
-    @staticmethod
     def _cleanup_gateway(config: RuntimeConfig) -> None:
-        token = config.extra.get("jarvis_gateway_token")
-        if token:
-            try:
-                from app.server import gateway_transport
-                gateway_transport.revoke_session(token)
-            except ImportError:
-                logger.warning("Unable to revoke Claude gateway session")
-        config_path = config.extra.get("jarvis_mcp_config")
-        if config_path:
-            try:
-                Path(config_path).unlink(missing_ok=True)
-            except OSError:
-                logger.warning("Unable to remove Claude gateway config")
+        """Clean up JarvisMCP session resources."""
+        try:
+            from app.server import gateway_transport
+            token = config.extra.get("jarvis_gateway_token")
+            config_path = config.extra.get("jarvis_mcp_config")
+            if config_path and config.extra.get("jarvis_mcp_generator") == "jarvis_mcp":
+                try:
+                    subprocess.run(
+                        ["codex", "mcp", "remove", "jarvis"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                except Exception:
+                    pass
+            JarvisMCPConfig.cleanup_config(token, config_path, gateway_transport)
+        except ImportError:
+            logger.warning("Unable to cleanup JarvisMCP session (gateway_transport not available)")
+        except Exception as exc:
+            logger.warning("Error during JarvisMCP cleanup: %s", exc)
 
     async def _attach_session_to_bridge(
         self,

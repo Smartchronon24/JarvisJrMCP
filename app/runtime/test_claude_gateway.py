@@ -15,6 +15,10 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from app.runtime.server import RuntimeServer
+from app.runtime.jarvis_mcp import JarvisMCPConfig
+from app.tools.gateway import JarvisToolGateway
+from app.runtime.adapters.claude import ClaudeAdapter
+from app.runtime.contract import RuntimeConfig
 
 
 def test_claude_gateway_config_is_session_scoped_and_disposable(tmp_path: Path) -> None:
@@ -31,7 +35,12 @@ def test_claude_gateway_config_is_session_scoped_and_disposable(tmp_path: Path) 
     with patch("app.server.agent", agent), patch(
         "app.server.gateway_transport", transport
     ):
-        token, config_path = RuntimeServer._create_claude_gateway_config()
+        # Use the new JarvisMCPConfig API
+        mcp_config = JarvisMCPConfig(
+            transport,
+            JarvisToolGateway(agent.execution_gateway.tool_registry, agent.execution_gateway)
+        )
+        token, config_path = mcp_config.create_config()
 
     assert token == "session-token"
     assert config_path is not None
@@ -50,6 +59,22 @@ def test_claude_gateway_config_is_session_scoped_and_disposable(tmp_path: Path) 
         )
     )
     assert not Path(config_path).exists()
+
+
+def test_claude_mcp_session_uses_native_allowlist_without_bare_mode() -> None:
+    command = ClaudeAdapter().build_command(
+        RuntimeConfig(
+            executable_path="claude",
+            prompt="Use Jarvis to find an echo capability.",
+            extra={"jarvis_mcp_config": r"C:\temp\jarvis.json"},
+        )
+    )
+    assert "--mcp-config" in command
+    assert "--strict-mcp-config" in command
+    assert "--no-session-persistence" in command
+    assert "--bare" not in command
+    assert "mcp__jarvis__jarvis_search" in command
+    assert "mcp__jarvis__jarvis_execute" in command
 
 
 @pytest.mark.asyncio

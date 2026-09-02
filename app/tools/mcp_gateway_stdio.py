@@ -44,13 +44,18 @@ async def _request(operation: str, arguments: dict) -> str:
 
 @_mcp.tool()
 async def jarvis_search(query: str = "") -> str:
-    """Find enabled Jarvis capabilities relevant to a natural-language query."""
+    """Find enabled Jarvis capabilities for external-world actions.
+
+    Use this before acting on messaging, browser, web, memory, or other
+    connected-service requests. Do not inspect the repository to discover
+    Jarvis capabilities.
+    """
     return await _request("search", {"query": query})
 
 
 @_mcp.tool()
 async def jarvis_execute(tool_name: str, arguments: dict) -> str:
-    """Execute one previously discovered Jarvis tool."""
+    """Execute one previously discovered Jarvis capability tool."""
     return await _request(
         "execute",
         {"tool_name": tool_name, "arguments": arguments},

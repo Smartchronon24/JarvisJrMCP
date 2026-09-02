@@ -14,25 +14,32 @@ class CodexAdapter(FrameworkAdapter):
     def build_command(self, config: RuntimeConfig) -> List[str]:
         # Always use the exec subcommand for single prompt runs
         cmd = [config.executable_path, "exec"]
-        
+
         if config.model_name:
             cmd.extend(["--model", config.model_name])
-            
+
+        # The installed Codex CLI uses `codex mcp add` for MCP registration,
+        # not a per-run `--mcp-config` flag. Registration is handled before the
+        # session launch in the runtime wrapper when a Jarvis gateway is attached.
         if config.provider_name:
             if config.provider_name.lower() in ("ollama", "local"):
                 cmd.extend(["--oss", "--local-provider", "ollama"])
             else:
                 # E.g. openai or other provider via -c config override
                 cmd.extend(["-c", f"model_provider='\"{config.provider_name}\"'"])
-                
+
         # If endpoint URL is given, we might need to override base_url via -c
         if config.endpoint_url:
             provider = config.provider_name or "default"
             cmd.extend(["-c", f"model_providers.{provider}.base_url='\"{config.endpoint_url}\"'"])
-            
+
+        if not config.interactive:
+            # Keep runtime requests isolated from prior Codex conversations.
+            cmd.append("--ephemeral")
+
         if config.prompt:
             cmd.append(config.prompt)
-            
+
         return cmd
 
     def build_environment(self, config: RuntimeConfig) -> Dict[str, str]:

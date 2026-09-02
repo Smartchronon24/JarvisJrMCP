@@ -22,12 +22,26 @@ logger = logging.getLogger("jarvis.multi_agent")
 
 _CAPABILITY_INTENT_PATTERNS = {
     "memory": re.compile(r"\b(?:memory|remember|recollect|recall|forget|forgot|stored|save|saved)\b", re.IGNORECASE),
-    "web_research": re.compile(r"\b(?:search|research|latest|current|recent|news|price|prices)\b", re.IGNORECASE),
-    "browser_automation": re.compile(r"\b(?:open|navigate|click|type|fill|browse|website|webpage)\b", re.IGNORECASE),
     "messaging": re.compile(r"\b(?:whatsapp|message|contact|send)\b", re.IGNORECASE),
-    "filesystem": re.compile(r"\b(?:file|folder|directory|read|write|list)\b", re.IGNORECASE),
+    "browser_automation": re.compile(
+        r"\b(?:navigate|click|type|fill|browse|website|webpage|youtube|url)\b",
+        re.IGNORECASE,
+    ),
+    "filesystem": re.compile(r"\b(?:file|folder|directory|write|list)\b", re.IGNORECASE),
     "terminal": re.compile(r"\b(?:terminal|shell|cmd|command|run|execute|pytest|npm|git|install|pip|python)\b", re.IGNORECASE),
+    "web_research": re.compile(r"\b(?:search|research|latest|current|news|price|prices)\b", re.IGNORECASE),
 }
+
+# This is an intent boundary, not a second router: external-world requests are
+# delegated to the matching capability, while repository work remains native
+# to the framework handling that task.
+CAPABILITY_SELECTION_CONTRACT = (
+    "For external-world actions (messaging, browser interaction, memory, or web "
+    "research), delegate to the matching Jarvis capability and use its MCP tools. "
+    "Do not inspect the repository to discover or simulate those capabilities. "
+    "Repository files, shell commands, and code changes should remain native "
+    "repository tasks unless the user explicitly asks for a Jarvis capability."
+)
 
 # ---------------------------------------------------------------------------
 # Capability Registry (Easy 4)
@@ -173,6 +187,7 @@ You MUST return a JSON object with the following fields:
 - reason: A brief explanation of why you chose these capabilities.
 
 STRICT RULES:
+- {CAPABILITY_SELECTION_CONTRACT}
 - Only use capability names exactly as listed above. Do not invent new capability names.
 - Use action "respond" only for greetings, casual conversation, simple factual questions, basic explanations, and other requests comfortably within your capabilities.
 - Use action "delegate" if the request needs any MCP tool, external action, web search, current or time-sensitive information, specialized or deep reasoning, multi-step execution, or if you are uncertain.
@@ -299,17 +314,22 @@ Example output:
         if decision.get("action") != "respond":
             return decision
 
-        for capability, pattern in _CAPABILITY_INTENT_PATTERNS.items():
-            if pattern.search(user_message):
-                return {
-                    **decision,
-                    "action": "delegate",
-                    "response": "",
-                    "task_type": f"{capability}_task",
-                    "capabilities": [capability],
-                    "worker_instruction": user_message,
-                    "reason": f"The request matches the {capability} capability and must be handled with its MCP tools.",
-                }
+        matched = [
+            capability
+            for capability, pattern in _CAPABILITY_INTENT_PATTERNS.items()
+            if pattern.search(user_message)
+        ]
+        if matched:
+            capability = matched[0]
+            return {
+                **decision,
+                "action": "delegate",
+                "response": "",
+                "task_type": f"{capability}_task",
+                "capabilities": [capability],
+                "worker_instruction": user_message,
+                "reason": f"The request matches the {capability} capability and must be handled with its MCP tools.",
+            }
 
         return decision
 

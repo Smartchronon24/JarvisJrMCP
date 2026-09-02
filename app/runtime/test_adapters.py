@@ -51,7 +51,9 @@ def test_claude_adapter():
         "--mcp-config",
         "C:\\temp\\jarvis.json",
         "--strict-mcp-config",
-        "--bare",
+        "--allowed-tools",
+        "mcp__jarvis__jarvis_search",
+        "mcp__jarvis__jarvis_execute",
         "--no-session-persistence",
         "--print",
         "test prompt",
@@ -86,15 +88,28 @@ def test_codex_adapter():
         model_name="gpt-oss:120b",
         provider_name="ollama"
     )
-    
+
     assert adapter.get_identity() == FrameworkIdentity.CODEX
     cmd = adapter.build_command(config)
-    
+
     assert cmd == [
-        "codex", "exec", 
-        "--model", "gpt-oss:120b", 
-        "--oss", "--local-provider", "ollama", 
+        "codex", "exec",
+        "--model", "gpt-oss:120b",
+        "--oss", "--local-provider", "ollama",
+        "--ephemeral",
         "test prompt"
+    ]
+
+    gateway_config = RuntimeConfig(
+        executable_path="codex",
+        prompt="test prompt",
+        extra={"jarvis_mcp_config": "C:\\temp\\jarvis.json"},
+    )
+    assert CodexAdapter().build_command(gateway_config) == [
+        "codex",
+        "exec",
+        "--ephemeral",
+        "test prompt",
     ]
 
 def test_codex_adapter_custom_provider():
@@ -122,12 +137,27 @@ def test_copilot_adapter():
         interactive=False,
         extra={"github_token": "ghp_12345"}
     )
-    
+
     assert adapter.get_identity() == FrameworkIdentity.COPILOT
     cmd = adapter.build_command(config)
-    
+
     assert cmd == ["copilot", "--model", "gpt-4", "--allow-all-tools", "-p", "test prompt"]
-    
+
+    gateway_config = RuntimeConfig(
+        executable_path="copilot",
+        prompt="test prompt",
+        interactive=False,
+        extra={"github_token": "ghp_12345", "jarvis_mcp_config": "C:\\temp\\jarvis.json"},
+    )
+    assert CopilotAdapter().build_command(gateway_config) == [
+        "copilot",
+        "--additional-mcp-config",
+        "@C:\\temp\\jarvis.json",
+        "--allow-all-tools",
+        "-p",
+        "test prompt",
+    ]
+
     env = adapter.build_environment(config)
     assert env.get("COPILOT_GITHUB_TOKEN") == "ghp_12345"
 

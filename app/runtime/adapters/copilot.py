@@ -12,10 +12,19 @@ class CopilotAdapter(FrameworkAdapter):
 
     def build_command(self, config: RuntimeConfig) -> List[str]:
         cmd = [config.executable_path]
-        
+
         if config.model_name:
             cmd.extend(["--model", config.model_name])
-            
+
+        gateway_config = config.extra.get("jarvis_mcp_config")
+        if gateway_config:
+            # Copilot expects either inline JSON or a file path prefixed with @.
+            if gateway_config.startswith("@"):
+                value = gateway_config
+            else:
+                value = f"@{gateway_config}"
+            cmd.extend(["--additional-mcp-config", value])
+
         if not config.interactive:
             # Use the short prompt flag supported consistently by the
             # installed Copilot CLI and its Windows launcher.
