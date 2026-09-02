@@ -96,6 +96,14 @@ class TestClaudeAdapterValidation:
         cmd = self._adapter().build_command(cfg)
         assert cmd[-1] == "hello world"
 
+    def test_noninteractive_claude_isolated_from_implicit_context(self):
+        cfg = RuntimeConfig(executable_path=CLAUDE_EXE, prompt="hi", interactive=False)
+        cmd = self._adapter().build_command(cfg)
+        assert "--bare" in cmd
+        assert "--no-session-persistence" in cmd
+        assert "--resume" not in cmd
+        assert "--continue" not in cmd
+
     def test_model_flag_present_when_set(self):
         cfg = RuntimeConfig(executable_path=CLAUDE_EXE, prompt="hi", model_name="claude-opus-4-5", interactive=False)
         cmd = self._adapter().build_command(cfg)

@@ -25,6 +25,25 @@ class EchoAdapter(FrameworkAdapter):
         return env
 
 
+class ClaudeEnvironmentProbe(ClaudeAdapter):
+    def build_command(self, config):
+        return [sys.executable, "-c", "import os; print(os.getenv('COPILOT_CLI', 'missing'))"]
+
+
+@pytest.mark.asyncio
+async def test_claude_child_does_not_inherit_copilot_host_markers(monkeypatch):
+    monkeypatch.setenv("COPILOT_CLI", "1")
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "host-session")
+    proc = await RuntimeProcessExecutor.execute(
+        ClaudeEnvironmentProbe(),
+        RuntimeConfig(executable_path=sys.executable),
+    )
+    output = await proc.wait_for_event(EventType.OUTPUT, timeout=2)
+    assert isinstance(output, OutputEvent)
+    assert output.text == "missing"
+    await proc.wait()
+
+
 @pytest.mark.asyncio
 async def test_runtime_process_executes_successfully():
     adapter = EchoAdapter()

@@ -343,6 +343,17 @@ class RuntimeProcessExecutor:
 
         merged_env = os.environ.copy()
         merged_env.update(adapter.build_environment(config))
+        if adapter.get_identity().value == "claude":
+            # The host may itself be Copilot; those markers can cause Claude
+            # Code to inherit host-specific session and skill context.
+            for key in (
+                "COPILOT_CLI",
+                "COPILOT_CLI_RUN_AS_NODE",
+                "COPILOT_AGENT_SESSION_ID",
+                "COPILOT_ENABLE_BUILTIN_GITHUB_MCP",
+                "COPILOT_MCP_APPS",
+            ):
+                merged_env.pop(key, None)
 
         # Do not execute the CLI as a readiness probe. Framework commands may
         # perform real model work, block for authentication, or consume input.

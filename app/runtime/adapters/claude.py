@@ -23,6 +23,9 @@ class ClaudeAdapter(FrameworkAdapter):
             cmd.extend(["--mcp-config", gateway_config, "--strict-mcp-config"])
             
         if not config.interactive:
+            # Keep each print invocation isolated from Claude's implicit project
+            # plugins, hooks, memory, prefetches, and persisted sessions.
+            cmd.extend(["--bare", "--no-session-persistence"])
             # Claude Code uses --print for non-interactive output
             cmd.append("--print")
             if config.prompt:

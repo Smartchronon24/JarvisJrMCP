@@ -29,7 +29,15 @@ def test_claude_adapter():
     assert adapter.get_identity() == FrameworkIdentity.CLAUDE
     cmd = adapter.build_command(config)
     
-    assert cmd == ["claude", "--model", "claude-3-sonnet", "--print", "test prompt"]
+    assert cmd == [
+        "claude",
+        "--model",
+        "claude-3-sonnet",
+        "--bare",
+        "--no-session-persistence",
+        "--print",
+        "test prompt",
+    ]
     env = adapter.build_environment(config)
     assert env == {}
 
@@ -43,6 +51,8 @@ def test_claude_adapter():
         "--mcp-config",
         "C:\\temp\\jarvis.json",
         "--strict-mcp-config",
+        "--bare",
+        "--no-session-persistence",
         "--print",
         "test prompt",
     ]
