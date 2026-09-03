@@ -30,6 +30,7 @@ class ClaudexWebSocketClient {
         this.onEvent = options.onEvent || null;
         this.onError = options.onError || null;
         this.onSessionStarted = options.onSessionStarted || null;
+        this.onAcknowledged = options.onAcknowledged || null;
         
         this.subscriptions = new Set();
     }
@@ -122,16 +123,6 @@ class ClaudexWebSocketClient {
             working_directory: options.working_directory || null,
             executable_path: options.executable_path || null,
             environment: options.environment || {},
-            data: {
-                framework: options.framework || 'claude',
-                prompt: prompt,
-                model: options.model || null,
-                provider: options.provider || null,
-                endpoint_url: options.endpoint_url || null,
-                working_directory: options.working_directory || null,
-                executable_path: options.executable_path || null,
-                environment: options.environment || {},
-            }
         };
 
         if (!payload.prompt || !String(payload.prompt).trim()) {
@@ -289,6 +280,7 @@ class ClaudexWebSocketClient {
                 this._pendingStart = false;
                 if (this.onSessionStarted) this.onSessionStarted(message.run_id);
             }
+            if (this.onAcknowledged) this.onAcknowledged(message.run_id);
             console.log('Acknowledged for run:', message.run_id);
             return;
         }

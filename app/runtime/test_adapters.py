@@ -34,6 +34,7 @@ def test_claude_adapter():
         "--model",
         "claude-3-sonnet",
         "--bare",
+        "--disable-slash-commands",
         "--no-session-persistence",
         "--print",
         "test prompt",
@@ -44,16 +45,22 @@ def test_claude_adapter():
     gateway_config = RuntimeConfig(
         executable_path="claude",
         prompt="test prompt",
-        extra={"jarvis_mcp_config": "C:\\temp\\jarvis.json"},
+        extra={
+            "jarvis_mcp_config": "C:\\temp\\jarvis.json",
+            "jarvis_context": "You are Jarvis.",
+        },
     )
     assert ClaudeAdapter().build_command(gateway_config) == [
         "claude",
+        "--system-prompt",
+        "You are Jarvis.",
         "--mcp-config",
         "C:\\temp\\jarvis.json",
         "--strict-mcp-config",
         "--allowed-tools",
-        "mcp__jarvis__jarvis_search",
-        "mcp__jarvis__jarvis_execute",
+        "mcp__jarvis__external_action",
+        "--bare",
+        "--disable-slash-commands",
         "--no-session-persistence",
         "--print",
         "test prompt",
@@ -80,6 +87,20 @@ def test_claude_adapter():
     assert ollama_provider_env["ANTHROPIC_AUTH_TOKEN"] == "ollama"
     assert ollama_provider_env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
 
+    inherited_gateway_config = RuntimeConfig(
+        executable_path="claude",
+        prompt="test prompt",
+        model_name="gpt-oss:120b-cloud",
+        provider_name="ollama",
+        environment={
+            "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+            "ANTHROPIC_API_KEY": "inherited-key",
+        },
+    )
+    inherited_gateway_env = adapter.build_environment(inherited_gateway_config)
+    assert inherited_gateway_env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+    assert inherited_gateway_env["ANTHROPIC_API_KEY"] == ""
+
 def test_codex_adapter():
     adapter = CodexAdapter()
     config = RuntimeConfig(
@@ -103,14 +124,23 @@ def test_codex_adapter():
     gateway_config = RuntimeConfig(
         executable_path="codex",
         prompt="test prompt",
-        extra={"jarvis_mcp_config": "C:\\temp\\jarvis.json"},
+        extra={
+            "jarvis_mcp_config": "C:\\temp\\jarvis.json",
+            "jarvis_context": "You are Jarvis.",
+        },
     )
-    assert CodexAdapter().build_command(gateway_config) == [
-        "codex",
-        "exec",
-        "--ephemeral",
-        "test prompt",
-    ]
+    command = CodexAdapter().build_command(gateway_config)
+    assert command[:2] == ["codex", "exec"]
+    assert 'developer_instructions="You are Jarvis."' in command
+    assert 'mcp_servers.jarvis.default_tools_approval_mode="auto"' in command
+    assert command[-1] == (
+        "You are Jarvis.\n\n"
+        "Use the available Jarvis MCP capability for this request before explaining limitations. "
+        "The exact MCP tool name is `mcp__jarvis__external_action`; spell `jarvis` exactly and "
+        "never use `jarson` or any other server name.\n\n"
+        "User request:\n"
+        "test prompt"
+    )
 
 def test_codex_adapter_custom_provider():
     adapter = CodexAdapter()
@@ -141,21 +171,26 @@ def test_copilot_adapter():
     assert adapter.get_identity() == FrameworkIdentity.COPILOT
     cmd = adapter.build_command(config)
 
-    assert cmd == ["copilot", "--model", "gpt-4", "--allow-all-tools", "-p", "test prompt"]
+    assert cmd == ["copilot", "--model", "gpt-4", "--allow-all-tools", "-p=test prompt"]
 
     gateway_config = RuntimeConfig(
         executable_path="copilot",
         prompt="test prompt",
         interactive=False,
-        extra={"github_token": "ghp_12345", "jarvis_mcp_config": "C:\\temp\\jarvis.json"},
+        extra={
+            "github_token": "ghp_12345",
+            "jarvis_mcp_config": "C:\\temp\\jarvis.json",
+            "jarvis_context": "You are Jarvis.",
+        },
     )
     assert CopilotAdapter().build_command(gateway_config) == [
         "copilot",
         "--additional-mcp-config",
         "@C:\\temp\\jarvis.json",
         "--allow-all-tools",
-        "-p",
-        "test prompt",
+        "--allow-all-mcp-server-instructions",
+        "--allow-all-urls",
+        "-p=You are Jarvis. User request: test prompt",
     ]
 
     env = adapter.build_environment(config)

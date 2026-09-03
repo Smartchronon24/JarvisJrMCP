@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -88,16 +89,23 @@ class RuntimeProcess:
     @staticmethod
     def _looks_like_approval_required(text: str) -> bool:
         lower = text.lower()
-        indicators = (
-            "approve",
-            "approval required",
-            "permission required",
-            "allow this",
-            "confirm",
-            "authorize",
-            "do you want to proceed",
+        if any(
+            phrase in lower
+            for phrase in (
+                "approval required",
+                "permission required",
+                "do you want to proceed",
+                "press enter to approve",
+            )
+        ):
+            return True
+        return bool(
+            re.search(
+                r"\b(?:allow|approve|authorize)\b.{0,40}\b(?:this|the)\b"
+                r".{0,20}\b(?:tool|action|command|request|call)\b",
+                lower,
+            )
         )
-        return any(indicator in lower for indicator in indicators)
 
     @staticmethod
     def _looks_like_input_required(text: str) -> bool:
@@ -265,7 +273,26 @@ class RuntimeProcessExecutor:
 
         lower = executable.lower()
         if lower.endswith((".cmd", ".bat")):
+            if lower.endswith("\\claude.cmd") or lower.endswith("/claude.cmd"):
+                npm_dir = os.path.dirname(executable)
+                claude_exe = os.path.join(
+                    npm_dir, "node_modules", "@anthropic-ai", "claude-code",
+                    "bin", "claude.exe",
+                )
+                if os.path.isfile(claude_exe):
+                    return [claude_exe, *command[1:]]
+            if lower.endswith("\\copilot.cmd") or lower.endswith("/copilot.cmd"):
+                npm_dir = os.path.dirname(executable)
+                loader = os.path.join(npm_dir, "node_modules", "@github", "copilot", "npm-loader.js")
+                node = os.path.join(npm_dir, "node.exe")
+                if os.path.isfile(loader):
+                    return [node if os.path.isfile(node) else "node", loader, *command[1:]]
             cmdline = subprocess.list2cmdline(command)
+            # An unquoted launcher path lets cmd preserve quoted option
+            # values. Only wrap the full command when the launcher itself
+            # contains spaces.
+            if " " in executable:
+                cmdline = f'"{cmdline}"'
             return ["cmd.exe", "/d", "/s", "/c", cmdline]
         return command
 

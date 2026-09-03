@@ -73,7 +73,7 @@ class JarvisMCPConfig:
             token = str(session["token"])
             
             # Path to the MCP gateway stdio adapter
-            bridge = Path(__file__).resolve().parents[1] / "tools" / "mcp_gateway_stdio.py"
+            bridge = Path(__file__).resolve().parents[1] / "tools" / "mcp_compat_stdio.py"
             
             # Generate MCP configuration
             config = {

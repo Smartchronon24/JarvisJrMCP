@@ -1,4 +1,5 @@
 from typing import Dict, List
+import json
 from app.runtime.contract import FrameworkAdapter, FrameworkIdentity, RuntimeConfig
 
 class CodexAdapter(FrameworkAdapter):
@@ -13,7 +14,9 @@ class CodexAdapter(FrameworkAdapter):
 
     def build_command(self, config: RuntimeConfig) -> List[str]:
         # Always use the exec subcommand for single prompt runs
-        cmd = [config.executable_path, "exec"]
+        cmd = [config.executable_path]
+
+        cmd.append("exec")
 
         if config.model_name:
             cmd.extend(["--model", config.model_name])
@@ -33,12 +36,31 @@ class CodexAdapter(FrameworkAdapter):
             provider = config.provider_name or "default"
             cmd.extend(["-c", f"model_providers.{provider}.base_url='\"{config.endpoint_url}\"'"])
 
+        jarvis_context = config.extra.get("jarvis_context")
+        if jarvis_context:
+            cmd.extend(["-c", f"developer_instructions={json.dumps(jarvis_context)}"])
+        if config.extra.get("jarvis_mcp_config"):
+            cmd.extend([
+                "-c",
+                'mcp_servers.jarvis.default_tools_approval_mode="auto"',
+            ])
+
         if not config.interactive:
             # Keep runtime requests isolated from prior Codex conversations.
             cmd.append("--ephemeral")
 
         if config.prompt:
-            cmd.append(config.prompt)
+            prompt = config.prompt
+            if jarvis_context:
+                prompt = (
+                    f"{jarvis_context}\n\n"
+                    "Use the available Jarvis MCP capability for this request before "
+                    "explaining limitations. The exact MCP tool name is "
+                    "`mcp__jarvis__external_action`; spell `jarvis` exactly and "
+                    "never use `jarson` or any other server name.\n\n"
+                    f"User request:\n{prompt}"
+                )
+            cmd.append(prompt)
 
         return cmd
 

@@ -9,7 +9,7 @@ import sys
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.append(PROJECT_ROOT)
 
-from app.tools.selector import selector
+from app.tools.selector import selector, DeterministicToolSelector
 from app.tools import tool_registry
 from app.tools.models import ToolMetadata
 
@@ -76,6 +76,55 @@ def main():
     # Simple assertion: should include at least one filesystem tool
     assert any(name.startswith("filesystem__") for name in selected), "Filesystem tool not selected"
     print("Test passed.")
+
+
+def test_navigation_prefers_navigate_over_click():
+    tools = [
+        ToolMetadata(
+            name="playwright__browser_click",
+            server="playwright",
+            tool_name="browser_click",
+            capability="browser",
+            description="Click a target",
+            input_schema={"properties": {"target": {}}},
+        ),
+        ToolMetadata(
+            name="playwright__browser_navigate",
+            server="playwright",
+            tool_name="browser_navigate",
+            capability="browser",
+            description="Navigate to a URL",
+            input_schema={"properties": {"url": {}}},
+        ),
+    ]
+    assert DeterministicToolSelector().select(
+        "Please open youtube for me", tools, max_tools=1
+    ) == ["playwright__browser_navigate"]
+
+
+def test_phone_requests_prefer_tools_with_phone_lookup_inputs():
+    tools = [
+        ToolMetadata(
+            name="messaging__download_media",
+            server="messaging",
+            tool_name="download_media",
+            capability="communication",
+            description="Download media from a message",
+            input_schema={"properties": {"message_id": {}, "chat_jid": {}}},
+        ),
+        ToolMetadata(
+            name="messaging__get_contact",
+            server="messaging",
+            tool_name="get_contact",
+            capability="communication",
+            description="Look up a contact by phone number",
+            input_schema={"properties": {"phone_number": {}}},
+        ),
+    ]
+    assert DeterministicToolSelector().select(
+        "Get the contact +917358247423", tools, max_tools=1
+    ) == ["messaging__get_contact"]
+
 
 if __name__ == "__main__":
     main()

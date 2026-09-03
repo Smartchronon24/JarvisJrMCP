@@ -31,8 +31,20 @@ class CopilotAdapter(FrameworkAdapter):
             # --allow-all-tools is required per CLI help: "required for non-interactive mode"
             # Without it Copilot may pause mid-run for tool permission prompts.
             cmd.append("--allow-all-tools")
+            if gateway_config:
+                cmd.extend(["--allow-all-mcp-server-instructions", "--allow-all-urls"])
             if config.prompt:
-                cmd.extend(["-p", config.prompt])
+                prompt = config.prompt
+                jarvis_context = config.extra.get("jarvis_context")
+                if jarvis_context:
+                    prompt = f"{jarvis_context}\n\nUser request:\n{prompt}"
+                # CMD treats embedded newlines as command separators even
+                # when the value is quoted.
+                prompt = " ".join(prompt.split())
+                # The Windows CMD launcher expands a separate quoted value
+                # into multiple argv entries. The equals form keeps the
+                # complete prompt as one Copilot CLI option.
+                cmd.append(f"-p={prompt}")
         else:
             if config.prompt:
                 cmd.append(config.prompt)

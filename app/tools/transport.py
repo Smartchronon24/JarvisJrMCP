@@ -57,8 +57,8 @@ class GatewayTransport:
         if not isinstance(payload, dict):
             raise ValueError("gateway request must be an object")
         operation = payload.get("operation")
-        if operation not in {"search", "execute"}:
-            raise ValueError("operation must be 'search' or 'execute'")
+        if operation not in {"search", "execute", "external_action"}:
+            raise ValueError("operation must be 'search', 'execute', or 'external_action'")
         arguments = payload.get("arguments", {})
         if not isinstance(arguments, dict):
             raise ValueError("arguments must be an object")
@@ -71,6 +71,16 @@ class GatewayTransport:
         if operation == "search":
             result = gateway.search(GatewaySearchRequest.from_mapping(arguments))
             return {"ok": True, "operation": operation, **result.to_dict()}
+
+        if operation == "external_action":
+            request = arguments.get("request")
+            if not isinstance(request, str) or not request.strip():
+                raise ValueError("external_action requires a non-empty request")
+            tool_arguments = arguments.get("arguments", {})
+            if not isinstance(tool_arguments, dict):
+                raise ValueError("external_action arguments must be an object")
+            result = await gateway.external_action(request, tool_arguments)
+            return {"operation": operation, **result}
 
         tool_name = arguments.get("tool_name")
         if not isinstance(tool_name, str) or not tool_name.strip():

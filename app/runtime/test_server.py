@@ -128,6 +128,36 @@ class TestCreateSessionValidation:
                 prompt=123,  # type: ignore
             )
 
+    @pytest.mark.asyncio
+    async def test_claude_accepts_ollama_model_id_for_compatible_endpoint(self):
+        server = RuntimeServer()
+        with patch("app.runtime.server.RuntimeProcessExecutor.execute") as mock_execute:
+            mock_execute.return_value = MockRuntimeProcess()
+            await server.create_session(
+                framework="claude",
+                prompt="hello",
+                model="gpt-oss:120b-cloud",
+                provider="ollama",
+            )
+            config = mock_execute.call_args[0][1]
+            assert config.model_name == "gpt-oss:120b-cloud"
+            assert config.provider_name == "ollama"
+
+    @pytest.mark.asyncio
+    async def test_start_request_preserves_punctuation_in_prompt(self):
+        server = RuntimeServer()
+        with patch("app.runtime.server.RuntimeProcessExecutor.execute") as mock_execute:
+            mock_process = MockRuntimeProcess()
+            mock_execute.return_value = mock_process
+
+            orchestrator, _ = await server._handle_start_request({
+                "type": "start",
+                "framework": "claude",
+                "prompt": "hi, please state your name",
+            })
+
+            assert orchestrator.config.prompt == "hi, please state your name"
+
 
 class MockRuntimeProcess:
     """Mock B5 RuntimeProcess for testing."""

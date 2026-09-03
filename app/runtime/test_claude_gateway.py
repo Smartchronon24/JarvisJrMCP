@@ -72,9 +72,10 @@ def test_claude_mcp_session_uses_native_allowlist_without_bare_mode() -> None:
     assert "--mcp-config" in command
     assert "--strict-mcp-config" in command
     assert "--no-session-persistence" in command
-    assert "--bare" not in command
-    assert "mcp__jarvis__jarvis_search" in command
-    assert "mcp__jarvis__jarvis_execute" in command
+    assert "--bare" in command
+    assert "mcp__jarvis__external_action" in command
+    assert "mcp__jarvis__jarvis_search" not in command
+    assert "mcp__jarvis__jarvis_execute" not in command
 
 
 @pytest.mark.asyncio

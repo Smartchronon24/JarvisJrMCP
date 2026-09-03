@@ -19,22 +19,26 @@ class ClaudeAdapter(FrameworkAdapter):
             cmd.extend(["--model", config.model_name])
 
         gateway_config = config.extra.get("jarvis_mcp_config")
+        jarvis_context = config.extra.get("jarvis_context")
+        if jarvis_context:
+            # Replace Claude Code's coding-agent instructions. They cause local
+            # models to select skills such as code-review for ordinary prompts.
+            cmd.extend(["--system-prompt", jarvis_context])
         if gateway_config:
             cmd.extend(["--mcp-config", gateway_config, "--strict-mcp-config"])
             # Claude's `--bare` mode explicitly ignores --mcp-config. Allow
             # only the two session-scoped Jarvis tools instead of prompting.
             cmd.extend([
                 "--allowed-tools",
-                "mcp__jarvis__jarvis_search",
-                "mcp__jarvis__jarvis_execute",
+                "mcp__jarvis__external_action",
             ])
             
         if not config.interactive:
-            # `--bare` skips MCP configuration in the installed Claude CLI,
-            # so MCP-enabled sessions use strict config plus no persistence.
-            # Sessions without MCP retain the stronger bare isolation mode.
-            if not gateway_config:
-                cmd.append("--bare")
+            # Bare mode prevents project hooks, plugins, auto-memory, and
+            # inherited skills from rewriting a neutral user request. Claude
+            # explicitly supports supplying MCP/configuration in bare mode.
+            cmd.append("--bare")
+            cmd.append("--disable-slash-commands")
             cmd.append("--no-session-persistence")
             # Claude Code uses --print for non-interactive output
             cmd.append("--print")
@@ -57,20 +61,26 @@ class ClaudeAdapter(FrameworkAdapter):
 
     def build_environment(self, config: RuntimeConfig) -> Dict[str, str]:
         env = dict(config.environment)
+        config_dir = config.extra.get("claude_config_dir")
+        if config_dir:
+            env["CLAUDE_CONFIG_DIR"] = config_dir
 
         if config.endpoint_url:
             env.setdefault("ANTHROPIC_BASE_URL", config.endpoint_url)
 
         if config.provider_name and config.provider_name.lower() in {"ollama", "local"}:
-            env.setdefault("ANTHROPIC_AUTH_TOKEN", "ollama")
-            env.setdefault("ANTHROPIC_API_KEY", "")
-            env.setdefault("ANTHROPIC_BASE_URL", config.endpoint_url or "http://localhost:11434")
+            # Ollama model IDs are valid only when Claude is routed through the
+            # configured Ollama-compatible endpoint. Override inherited Anthropic
+            # settings so a host process cannot silently select another gateway.
+            env["ANTHROPIC_AUTH_TOKEN"] = "ollama"
+            env["ANTHROPIC_API_KEY"] = ""
+            env["ANTHROPIC_BASE_URL"] = config.endpoint_url or "http://localhost:11434"
 
         if config.model_name and ":" in config.model_name:
             # Claude Code does not know metadata for many Ollama model IDs.
             # Let the configured endpoint decide whether the model is usable.
-            env.setdefault("CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT", "1")
+            env["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
             if "ANTHROPIC_BASE_URL" not in env and config.endpoint_url is None:
-                env.setdefault("ANTHROPIC_BASE_URL", "http://localhost:11434")
+                env["ANTHROPIC_BASE_URL"] = "http://localhost:11434"
 
         return env

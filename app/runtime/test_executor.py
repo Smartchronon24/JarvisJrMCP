@@ -9,7 +9,7 @@ from app.runtime.adapters.codex import CodexAdapter
 from app.runtime.adapters.copilot import CopilotAdapter
 from app.runtime.contract import FrameworkAdapter, FrameworkIdentity, RuntimeConfig
 from app.runtime.events import EventType, OutputEvent, ProcessCompletedEvent, ProcessFailedEvent, ProcessInterruptedEvent
-from app.runtime.executor import RuntimeProcessExecutor, RuntimeProcessState
+from app.runtime.executor import RuntimeProcess, RuntimeProcessExecutor, RuntimeProcessState
 
 
 class EchoAdapter(FrameworkAdapter):
@@ -25,9 +25,24 @@ class EchoAdapter(FrameworkAdapter):
         return env
 
 
+def test_approval_detector_ignores_user_prompt_echo():
+    assert not RuntimeProcess._looks_like_approval_required(
+        "Open YouTube for me. please donot ask for confirmation."
+    )
+    assert RuntimeProcess._looks_like_approval_required(
+        "Approval required: allow this tool call?"
+    )
+
+
 class ClaudeEnvironmentProbe(ClaudeAdapter):
     def build_command(self, config):
-        return [sys.executable, "-c", "import os; print(os.getenv('COPILOT_CLI', 'missing'))"]
+        return [
+            sys.executable,
+            "-c",
+            "import os; print('|'.join(os.getenv(key, 'missing') for key in "
+            "('COPILOT_CLI', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', "
+            "'ANTHROPIC_API_KEY', 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT')))",
+        ]
 
 
 @pytest.mark.asyncio
@@ -40,7 +55,24 @@ async def test_claude_child_does_not_inherit_copilot_host_markers(monkeypatch):
     )
     output = await proc.wait_for_event(EventType.OUTPUT, timeout=2)
     assert isinstance(output, OutputEvent)
-    assert output.text == "missing"
+    assert output.text.startswith("missing|")
+    await proc.wait()
+
+
+@pytest.mark.asyncio
+async def test_claude_ollama_environment_reaches_child_process():
+    proc = await RuntimeProcessExecutor.execute(
+        ClaudeEnvironmentProbe(),
+        RuntimeConfig(
+            executable_path=sys.executable,
+            model_name="gpt-oss:120b-cloud",
+            provider_name="ollama",
+            endpoint_url="http://127.0.0.1:11434",
+        ),
+    )
+    output = await proc.wait_for_event(EventType.OUTPUT, timeout=2)
+    assert isinstance(output, OutputEvent)
+    assert output.text == "missing|http://127.0.0.1:11434|ollama||1"
     await proc.wait()
 
 
@@ -187,6 +219,29 @@ def test_windows_batch_commands_are_wrapped_for_cmd_exe(monkeypatch):
     assert "claude.cmd" in wrapped[4]
 
 
+def test_copilot_cmd_uses_node_loader(monkeypatch, tmp_path):
+    npm_dir = tmp_path / "npm"
+    loader = npm_dir / "node_modules" / "@github" / "copilot" / "npm-loader.js"
+    loader.parent.mkdir(parents=True)
+    loader.write_text("", encoding="utf-8")
+    (npm_dir / "node.exe").write_text("", encoding="utf-8")
+    command = [str(npm_dir / "copilot.cmd"), "-p=whats your name?"]
+    monkeypatch.setattr("app.runtime.executor.os.name", "nt", raising=False)
+    resolved = RuntimeProcessExecutor._normalize_windows_command(command)
+    assert resolved == [str(npm_dir / "node.exe"), str(loader), "-p=whats your name?"]
+
+
+def test_claude_cmd_uses_native_executable(monkeypatch, tmp_path):
+    npm_dir = tmp_path / "npm"
+    executable = npm_dir / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="utf-8")
+    command = [str(npm_dir / "claude.cmd"), "--print", "Hi, whats your name?"]
+    monkeypatch.setattr("app.runtime.executor.os.name", "nt", raising=False)
+    resolved = RuntimeProcessExecutor._normalize_windows_command(command)
+    assert resolved == [str(executable), "--print", "Hi, whats your name?"]
+
+
 @pytest.mark.asyncio
 async def test_runtime_does_not_execute_cli_as_readiness_probe(monkeypatch):
     def fail_if_called(*args, **kwargs):
@@ -223,7 +278,8 @@ async def test_framework_adapters_build_valid_runtime_commands():
     copilot = CopilotAdapter()
 
     assert claude.build_command(config)[:2] == ["python", "--model"]
-    assert codex.build_command(config)[0:3] == ["python", "exec", "--model"]
+    assert codex.build_command(config)[0:2] == ["python", "exec"]
+    assert "exec" in codex.build_command(config)
     assert copilot.build_command(config)[0:2] == ["python", "--model"]
     assert codex.build_environment(config) == {}
     assert copilot.build_environment(config)["COPILOT_GITHUB_TOKEN"] == "ghp_test"

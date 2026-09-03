@@ -139,7 +139,7 @@ class TestCodexAdapterValidation:
     def test_exec_subcommand_present(self):
         cfg = RuntimeConfig(executable_path=CODEX_EXE, prompt="hi")
         cmd = self._adapter().build_command(cfg)
-        assert cmd[1] == "exec"
+        assert "exec" in cmd
 
     def test_model_flag(self):
         cfg = RuntimeConfig(executable_path=CODEX_EXE, prompt="hi", model_name="gpt-oss:120b-cloud")

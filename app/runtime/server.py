@@ -28,6 +28,8 @@ import os
 import subprocess
 import sys
 import time
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -40,9 +42,45 @@ from app.runtime.runtime import RuntimeSessionOrchestrator, RuntimeExecutionStat
 from app.runtime.events import ErrorEvent
 from app.runtime.websocket import RuntimeWebSocketBridge
 from app.runtime.jarvis_mcp import JarvisMCPConfig
+from app.agents.context import canonical_jarvis_context
 from app.tools.gateway import JarvisToolGateway
 
 logger = logging.getLogger("jarvis.b8.server")
+
+
+def _set_codex_jarvis_approval_mode() -> None:
+    """Make the session-owned Jarvis MCP server available without a prompt."""
+    codex_home = os.environ.get("CODEX_HOME")
+    config_path = (
+        Path(codex_home) / "config.toml"
+        if codex_home
+        else Path.home() / ".codex" / "config.toml"
+    )
+    if not config_path.exists():
+        return
+    text = config_path.read_text(encoding="utf-8")
+    marker = "[mcp_servers.jarvis]"
+    start = text.find(marker)
+    if start < 0:
+        return
+    end = text.find("\n[", start + len(marker))
+    if end < 0:
+        end = len(text)
+    section = text[start:end]
+    additions = []
+    if "default_tools_approval_mode" not in section:
+        additions.append('default_tools_approval_mode = "auto"')
+    if "startup_timeout_sec" not in section:
+        additions.append("startup_timeout_sec = 15")
+    if "required" not in section:
+        additions.append("required = true")
+    updated = text[:start] + section.rstrip() + (
+        "\n" + "\n".join(additions) + "\n" if additions else "\n"
+    ) + text[end:]
+    if "mcp_optional_startup_grace_ms" not in updated:
+        updated = "mcp_optional_startup_grace_ms = 0\n" + updated
+    if updated != text:
+        config_path.write_text(updated, encoding="utf-8")
 
 
 class FrameworkResolver:
@@ -210,8 +248,7 @@ class RuntimeServer:
 
         # Determine executable path
         if not executable_path:
-            # Try to use framework name as executable (e.g., "claude", "codex")
-            executable_path = framework.lower()
+            executable_path = self._default_executable(framework)
 
         if working_directory is None:
             working_directory = os.getcwd()
@@ -219,9 +256,24 @@ class RuntimeServer:
         gateway_token = None
         gateway_config_path = None
         extra: dict[str, str] = {}
-        if framework.lower() in {"claude", "codex", "copilot"}:
+        needs_external_capability = any(
+            word in prompt.lower()
+            for word in (
+                "open", "launch", "navigate", "send", "message", "email",
+                "search", "find", "read", "retrieve", "play", "call",
+            )
+        )
+        if framework.lower() in {"claude", "codex", "copilot"} and (
+            framework.lower() != "claude"
+            or needs_external_capability
+        ):
             # Expose the canonical Tool Registry through the session-scoped JarvisMCP gateway
             # for every supported runtime, while preserving framework-specific adapter logic.
+            extra["jarvis_context"] = canonical_jarvis_context()
+            if framework.lower() == "claude" and (provider or "").lower() in {"ollama", "local"}:
+                # Do not let host/user Claude plugins and skills steer local
+                # Ollama sessions into unrelated coding tasks.
+                extra["claude_config_dir"] = tempfile.mkdtemp(prefix="jarvis-claude-")
             try:
                 from app.server import agent, gateway_transport
                 if agent is not None:
@@ -245,9 +297,25 @@ class RuntimeServer:
 
         if framework.lower() == "codex" and gateway_token and gateway_config_path:
             try:
-                bridge = Path(__file__).resolve().parents[1] / "tools" / "mcp_gateway_stdio.py"
+                bridge = Path(__file__).resolve().parents[1] / "tools" / "mcp_compat_stdio.py"
+                codex_environment = os.environ.copy()
+                codex_environment.update(environment or {})
                 codex_cmd = [
-                    "codex",
+                    executable_path,
+                    "mcp",
+                    "remove",
+                    "jarvis",
+                ]
+                subprocess.run(
+                    codex_cmd,
+                    cwd=working_directory,
+                    env=codex_environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                codex_cmd = [
+                    executable_path,
                     "mcp",
                     "add",
                     "jarvis",
@@ -259,15 +327,23 @@ class RuntimeServer:
                     sys.executable,
                     str(bridge),
                 ]
-                subprocess.run(
+                registration = subprocess.run(
                     codex_cmd,
                     cwd=working_directory,
-                    env=os.environ.copy(),
+                    env=codex_environment,
                     capture_output=True,
                     text=True,
                     check=False,
                 )
-                logger.info("Registered Jarvis MCP server with Codex using native `codex mcp add`")
+                if registration.returncode != 0:
+                    logger.error(
+                        "Codex Jarvis MCP registration failed (exit %s): %s",
+                        registration.returncode,
+                        (registration.stderr or registration.stdout or "").strip(),
+                    )
+                else:
+                    _set_codex_jarvis_approval_mode()
+                    logger.info("Registered Jarvis MCP server with Codex using native `codex mcp add`")
             except Exception as exc:
                 logger.warning("Failed to register Jarvis MCP server with Codex: %s", exc)
 
@@ -326,6 +402,40 @@ class RuntimeServer:
         return orchestrator, run_id
 
     @staticmethod
+    def _default_executable(framework: str) -> str:
+        """Prefer stable native launchers for each supported runtime."""
+        if framework.lower() == "codex":
+            configured = os.environ.get("JARVIS_CODEX_EXECUTABLE")
+            if configured:
+                return configured
+            compatibility = Path(os.environ.get(
+                "JARVIS_CODEX_COMPAT_PATH",
+                str(
+                    Path.home()
+                    / "AppData"
+                    / "Local"
+                    / "Temp"
+                    / "codex-c1.14a"
+                    / "codex-rs"
+                    / "target"
+                    / "debug"
+                    / "codex.exe"
+                ),
+            ))
+            if compatibility.is_file():
+                return str(compatibility)
+            discovered = shutil.which("codex")
+            if discovered:
+                return discovered
+        if framework.lower() in {"claude", "copilot"} and os.name == "nt":
+            # PowerShell shims are not safe argv boundaries for prompts with
+            # spaces. Prefer the generated CMD launcher on Windows.
+            discovered = shutil.which(f"{framework.lower()}.cmd")
+            if discovered:
+                return discovered
+        return framework.lower()
+
+    @staticmethod
     def _cleanup_gateway(config: RuntimeConfig) -> None:
         """Clean up JarvisMCP session resources."""
         try:
@@ -335,7 +445,7 @@ class RuntimeServer:
             if config_path and config.extra.get("jarvis_mcp_generator") == "jarvis_mcp":
                 try:
                     subprocess.run(
-                        ["codex", "mcp", "remove", "jarvis"],
+                        [config.executable_path, "mcp", "remove", "jarvis"],
                         capture_output=True,
                         text=True,
                         check=False,
@@ -343,6 +453,9 @@ class RuntimeServer:
                 except Exception:
                     pass
             JarvisMCPConfig.cleanup_config(token, config_path, gateway_transport)
+            claude_config_dir = config.extra.get("claude_config_dir")
+            if claude_config_dir:
+                shutil.rmtree(claude_config_dir, ignore_errors=False)
         except ImportError:
             logger.warning("Unable to cleanup JarvisMCP session (gateway_transport not available)")
         except Exception as exc:

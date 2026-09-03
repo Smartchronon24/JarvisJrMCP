@@ -34,7 +34,7 @@ function buildFakeDocument() {
     const ids = [
         'statusText', 'connectionStatus', 'dashState', 'dashFramework', 'dashModel', 'dashProvider',
         'dashRunId', 'dashElapsed', 'metricOutput', 'metricErrors', 'metricExit', 'statusBox',
-        'frameworkInput', 'modelInput', 'providerInput', 'workingDirectoryInput', 'promptInput',
+        'frameworkInput', 'executableInput', 'modelInput', 'providerInput', 'workingDirectoryInput', 'promptInput',
         'startSessionBtn', 'subscribeInput', 'subscribeBtn', 'disconnectBtn', 'inputSection', 'approvalSection',
         'cancelSection', 'errorSection', 'errorMessage', 'userInput', 'sendInputBtn', 'approveBtn',
         'rejectBtn', 'cancelBtn', 'clearTerminalBtn', 'terminal', 'terminalFallback'
@@ -109,6 +109,34 @@ test('start form validation prevents empty prompts and duplicate starts', () => 
 
     doc.getElementById('startSessionBtn').click();
     assert.equal(started.length, 1);
+});
+
+test('start form permits Ollama model IDs for Claude', () => {
+    const context = loadAppModule();
+    const doc = buildFakeDocument();
+    const started = [];
+    const client = {
+        connect() {},
+        disconnect() {},
+        subscribe() {},
+        startSession(payload) {
+            started.push(payload);
+        },
+        sendInput() {},
+        sendApproval() {},
+        cancel() {},
+    };
+
+    const app = new context.ClaudexStudioApp({ document: doc, client, term: { write() {} } });
+    app.state.connected = true;
+    doc.getElementById('frameworkInput').value = 'claude';
+    doc.getElementById('providerInput').value = 'Ollama';
+    doc.getElementById('modelInput').value = 'gpt-oss:120b-cloud';
+    doc.getElementById('promptInput').value = 'What is your name?';
+    doc.getElementById('startSessionBtn').click();
+
+    assert.equal(started.length, 1);
+    assert.equal(started[0].model, 'gpt-oss:120b-cloud');
 });
 
 test('start session uses the runtime start request without requiring manual subscription', () => {

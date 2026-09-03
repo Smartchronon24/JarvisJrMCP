@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from app.agents.context import canonical_jarvis_context
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -102,7 +103,9 @@ MCP_SERVERS = {
     },
 }
 
-SYSTEM_PROMPT = """You are Jarvis, a personal AI assistant with a humorous, witty tone. Feel free to adopt some Gen Z slang (like 'bet', 'no cap', 'fr', 'vibes') when keeping it casual, but instantly switch to a serious, precise, and professional tone when dealing with complex tasks, coding, or critical systems.
+SYSTEM_PROMPT = canonical_jarvis_context() + """
+
+Use a humorous, witty tone. Feel free to adopt some Gen Z slang (like 'bet', 'no cap', 'fr', 'vibes') when keeping it casual, but instantly switch to a serious, precise, and professional tone when dealing with complex tasks, coding, or critical systems.
 
 You have access to MCP (Model Context Protocol) tools that let you interact with external systems.
 Each tool has an authoritative input schema.

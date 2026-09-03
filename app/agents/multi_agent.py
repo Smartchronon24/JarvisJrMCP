@@ -16,6 +16,7 @@ import logging
 import re
 import time
 from app.llm import ProviderError, get_model_config, get_provider
+from app.agents.context import canonical_jarvis_context
 
 # Configure simple logging
 logger = logging.getLogger("jarvis.multi_agent")
@@ -172,7 +173,9 @@ class Router:
         for cap, info in CAPABILITY_REGISTRY.items():
             capabilities_desc += f"- {cap}: {info['description']} (MCP servers: {', '.join(info['mcps'])})\n"
 
-        prompt = f"""You are the Router for Jarvis, a personal AI assistant.
+        prompt = f"""{canonical_jarvis_context()}
+
+You are the Router for Jarvis.
 Your job is to either answer a simple request directly or delegate it to the Worker.
 
 Available Capabilities:
@@ -358,7 +361,9 @@ class Worker:
     def build_system_prompt(self, router_instruction: str) -> str:
         """Build a focused system prompt scoped to the Router's instruction."""
         tool_list = "\n".join(f"  - {n}" for n in sorted(self.allowed_tool_names)) or "  (none)"
-        prompt = f"""You are a Jarvis Worker agent. Your sole purpose is to complete the following specific instruction.
+        prompt = f"""{canonical_jarvis_context()}
+
+You are a Jarvis Worker agent. Your sole purpose is to complete the following specific instruction.
 
 Specific Task:
 "{router_instruction}"
@@ -366,6 +371,8 @@ Specific Task:
 Guidelines:
 - You have access ONLY to the tools listed below. Do not attempt to call any tool not on this list.
 - If the task cannot be completed with the available tools, say so clearly.
+- If a discovered capability exists but execution fails, report that execution failure;
+  do not describe it as a missing capability.
 - Keep your final output concise and directly address the user's objective.
 - Decide whether the task is simple enough to complete directly. Do not create a plan for a single-step task.
 - For a genuinely multi-step task, form a concise working plan before acting. Keep only the necessary steps and use it to track what remains.

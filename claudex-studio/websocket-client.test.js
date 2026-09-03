@@ -61,6 +61,20 @@ test('subscribe message uses the expected B7 schema', () => {
     });
 });
 
+test('start message preserves punctuation and sends one authoritative prompt', () => {
+    const ClaudexWebSocketClient = loadClientModule();
+    const client = new ClaudexWebSocketClient({ wsUrl: 'ws://127.0.0.1:8765' });
+    const ws = makeWebSocketStub();
+    client.ws = ws;
+
+    const prompt = 'hi, please state your name';
+    client.startSession({ framework: 'claude', prompt });
+
+    const payload = JSON.parse(ws.sent[0]);
+    assert.equal(payload.prompt, prompt);
+    assert.equal(Object.hasOwn(payload, 'data'), false);
+});
+
 test('input approval and cancel messages use the exact runtime protocols', () => {
     const ClaudexWebSocketClient = loadClientModule();
     const client = new ClaudexWebSocketClient({ wsUrl: 'ws://127.0.0.1:8765' });
@@ -77,6 +91,19 @@ test('input approval and cancel messages use the exact runtime protocols', () =>
         type: 'input',
         run_id: 'run-abc',
         data: { text: 'hello' },
+    });
+
+    test('approval acknowledgements are delivered to the UI callback', () => {
+        const ClaudexWebSocketClient = loadClientModule();
+        let acknowledgedRunId = null;
+        const client = new ClaudexWebSocketClient({
+            wsUrl: 'ws://127.0.0.1:8765',
+            onAcknowledged: (runId) => { acknowledgedRunId = runId; },
+        });
+
+        client._handleMessage({ type: 'ack', run_id: 'run-ack' });
+
+        assert.equal(acknowledgedRunId, 'run-ack');
     });
     assert.deepStrictEqual(payloads[1], {
         type: 'approval',

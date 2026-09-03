@@ -209,7 +209,7 @@ class TestJarvisMCPServerRepresentation:
         Path(config_path).unlink()
     
     def test_server_args_point_to_gateway_script(self):
-        """The MCP server args should point to mcp_gateway_stdio.py."""
+        """The runtime config should expose the compatibility bridge."""
         mock_transport = mock.MagicMock()
         mock_gateway = mock.MagicMock()
         mock_session = {"token": "token"}
@@ -223,7 +223,7 @@ class TestJarvisMCPServerRepresentation:
         
         args = config_data["mcpServers"]["jarvis"]["args"]
         assert len(args) == 1
-        assert "mcp_gateway_stdio.py" in args[0]
+        assert "mcp_compat_stdio.py" in args[0]
         assert Path(args[0]).exists()
         
         # Cleanup

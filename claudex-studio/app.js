@@ -9,6 +9,13 @@
                 onEvent: (event) => this.handleEvent(event),
                 onError: (message) => this.handleError(message),
                 onSessionStarted: (runId) => this.handleSessionStarted(runId),
+                onAcknowledged: (runId) => {
+                    if (runId !== this.currentRunId || !this._approvalPending) return;
+                    this._approvalPending = false;
+                    this.state.waitingForApproval = false;
+                    this._setStatusBox('running', 'Approval accepted');
+                    this._setControlVisibility(false, false, true, false);
+                },
             });
             this.state = {
                 connected: false,
@@ -55,6 +62,7 @@
                 metricExit: doc.getElementById('metricExit'),
                 statusBox: doc.getElementById('statusBox'),
                 frameworkInput: doc.getElementById('frameworkInput'),
+                executableInput: doc.getElementById('executableInput'),
                 modelInput: doc.getElementById('modelInput'),
                 providerInput: doc.getElementById('providerInput'),
                 workingDirectoryInput: doc.getElementById('workingDirectoryInput'),
@@ -150,6 +158,7 @@
             }
             const fields = [
                 ui.frameworkInput,
+                ui.executableInput,
                 ui.modelInput,
                 ui.providerInput,
                 ui.workingDirectoryInput,
@@ -212,6 +221,7 @@
                     }
 
                     const framework = (ui.frameworkInput && ui.frameworkInput.value) || 'claude';
+                    const executablePath = (ui.executableInput && ui.executableInput.value || '').trim() || null;
                     const prompt = (ui.promptInput && ui.promptInput.value || '').trim();
                     const model = (ui.modelInput && ui.modelInput.value || '').trim() || null;
                     const provider = (ui.providerInput && ui.providerInput.value || '').trim() || null;
@@ -221,7 +231,7 @@
                         this.handleError('Enter a prompt before starting a runtime session');
                         return;
                     }
-                    
+
                     // B16 diagnostic: prompt integrity at UI capture
                     const promptHash = this._hashString(prompt).substring(0, 16);
                     console.log(`[B16-BOUNDARY-UIINPUT] prompt_hash=${promptHash}, prompt_len=${prompt.length}, prompt="${prompt}"`);
@@ -244,6 +254,7 @@
 
                     this.client.startSession({
                         framework,
+                        executable_path: executablePath,
                         prompt,
                         model,
                         provider,

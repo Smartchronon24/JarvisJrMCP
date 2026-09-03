@@ -139,7 +139,7 @@ class DeterministicToolSelector(ToolSelectionStrategy):
 
     def _intents(self, request: str) -> Set[str]:
         lowered = request.lower()
-        return {
+        intents = {
             intent
             for intent, terms in _INTENT_PATTERNS.items()
             if any(
@@ -149,6 +149,9 @@ class DeterministicToolSelector(ToolSelectionStrategy):
                 for term in terms
             )
         }
+        if "open_url" in lowered:
+            intents.add("NAVIGATE")
+        return intents
 
     def _capabilities(self, request: str) -> Set[str]:
         lowered = request.lower()
@@ -157,6 +160,11 @@ class DeterministicToolSelector(ToolSelectionStrategy):
             for capability, terms in _CAPABILITY_TERMS.items()
             if any(term in lowered for term in terms)
         }
+        if any(
+            re.search(rf"\b{re.escape(term)}\b", lowered)
+            for term in _INTENT_PATTERNS["NAVIGATE"]
+        ):
+            capabilities.add("browser")
         terminal_terms = _CAPABILITY_TERMS["terminal"]
         if "filesystem" in capabilities and not any(
             re.search(rf"\b{re.escape(term)}\b", lowered)
@@ -180,6 +188,9 @@ class DeterministicToolSelector(ToolSelectionStrategy):
         capabilities: Set[str],
     ) -> _ScoredTool:
         task_tokens = self._tokens(request)
+        phone_requested = bool(
+            re.search(r"(?<!\w)\+?[0-9][0-9()\s.-]{6,}[0-9](?!\w)", request)
+        )
         tool_tokens = self._tokens(" ".join((
             tool.tool_name,
             tool.description,
@@ -195,6 +206,14 @@ class DeterministicToolSelector(ToolSelectionStrategy):
         overlap = task_tokens & tool_tokens
         score = len(overlap) * 4
         direct = bool(overlap)
+        if phone_requested:
+            parameter_names = {
+                str(name).lower()
+                for name in tool.input_schema.get("properties", {})
+            } if isinstance(tool.input_schema, dict) else set()
+            if parameter_names.intersection({"phone", "phone_number", "identifier", "query"}):
+                score += 20
+                direct = True
         name = tool.tool_name.lower()
         capability = tool.capability.lower()
         if capabilities:
@@ -223,9 +242,16 @@ class DeterministicToolSelector(ToolSelectionStrategy):
         if "RECORD" in intents and "record" in name:
             score += 12
             direct = True
-        if "NAVIGATE" in intents and any(term in name for term in ("navigate", "open", "click")):
-            score += 8
-            direct = True
+        if "NAVIGATE" in intents:
+            if "navigate" in name:
+                score += 14
+                direct = True
+            elif "open" in name:
+                score += 10
+                direct = True
+            elif "click" in name and "click" in self._tokens(request):
+                score += 8
+                direct = True
         if capability == "terminal" and "EXECUTE" not in intents and "SCREENSHOT" not in intents:
             score -= 20
             direct = False
