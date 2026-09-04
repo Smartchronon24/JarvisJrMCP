@@ -18,16 +18,25 @@
                 },
             });
             this.state = {
-                connected: false,
-                runId: null,
-                framework: null,
-                model: null,
-                provider: null,
-                executionState: 'idle',
-                metrics: {},
-                waitingForInput: false,
-                waitingForApproval: false,
+                connection: { connected: false, reconnecting: false },
+                session: { runId: null, framework: null, model: null, provider: null, conversationId: 'default-conversation' },
+                execution: { state: 'idle', metrics: {} },
+                tools: { activities: [] },
+                approval: { pending: false, decision: null },
+                memory: { messages: [], entries: [] },
             };
+            Object.defineProperties(this.state, {
+                connected: { get: () => this.state.connection.connected, set: (value) => { this.state.connection.connected = value; } },
+                runId: { get: () => this.state.session.runId, set: (value) => { this.state.session.runId = value; } },
+                framework: { get: () => this.state.session.framework, set: (value) => { this.state.session.framework = value; } },
+                model: { get: () => this.state.session.model, set: (value) => { this.state.session.model = value; } },
+                provider: { get: () => this.state.session.provider, set: (value) => { this.state.session.provider = value; } },
+                executionState: { get: () => this.state.execution.state, set: (value) => { this.state.execution.state = value; } },
+                waitingForInput: { get: () => this.state.execution.waitingForInput, set: (value) => { this.state.execution.waitingForInput = value; } },
+                waitingForApproval: { get: () => this.state.approval.pending, set: (value) => { this.state.approval.pending = value; } },
+            });
+            this.state.execution.waitingForInput = false;
+            this.state.approval.pending = false;
 
             this.term = options.term || null;
             this.currentRunId = null;
@@ -84,6 +93,14 @@
                 cancelBtn: doc.getElementById('cancelBtn'),
                 terminalEl: doc.getElementById('terminal'),
                 terminalFallback: doc.getElementById('terminalFallback'),
+                jarvisIdentity: doc.getElementById('jarvisIdentity'),
+                conversationId: doc.getElementById('conversationId'),
+                resumeBtn: doc.getElementById('resumeBtn'),
+                hotSwapBtn: doc.getElementById('hotSwapBtn'),
+                conversationStatus: doc.getElementById('conversationStatus'),
+                memoryList: doc.getElementById('memoryList'),
+                toolActivityEmpty: doc.getElementById('toolActivityEmpty'),
+                toolActivityList: doc.getElementById('toolActivityList'),
             };
         }
 
@@ -387,6 +404,56 @@
             if (ui.cancelBtn) {
                 ui.cancelBtn.disabled = !showCancel;
             }
+
+            if (ui.resumeBtn) {
+                ui.resumeBtn.addEventListener('click', () => this.loadConversation());
+            }
+            if (ui.hotSwapBtn) {
+                ui.hotSwapBtn.addEventListener('click', () => {
+                    if (ui.frameworkInput) {
+                        const frameworks = ['claude', 'copilot'];
+                        const next = frameworks[(frameworks.indexOf(ui.frameworkInput.value) + 1) % frameworks.length];
+                        ui.frameworkInput.value = next;
+                        this._setStatusBox('idle', `Framework selected: ${next}`);
+                    }
+                });
+            }
+        }
+
+        async loadConversation() {
+            if (typeof fetch !== 'function' || !this.ui.conversationStatus) return;
+            this.ui.conversationStatus.textContent = 'Loading conversation history...';
+            try {
+                const response = await fetch('/api/messages');
+                if (!response.ok) throw new Error(`History request failed (${response.status})`);
+                const messages = await response.json();
+                this.ui.conversationStatus.textContent = messages.length
+                    ? `${messages.length} persisted messages available.`
+                    : 'No persisted messages for this conversation.';
+                if (this.ui.memoryList) {
+                    this.ui.memoryList.textContent = messages.slice(-6).map((message) =>
+                        `${message.role}: ${message.content}`).join('\n');
+                }
+            } catch (error) {
+                this.ui.conversationStatus.textContent = `History unavailable: ${error.message}`;
+            }
+        }
+
+        _renderToolActivity(event, completed) {
+            if (!this.ui.toolActivityList) return;
+            if (this.ui.toolActivityEmpty) this.ui.toolActivityEmpty.style.display = 'none';
+            const data = event.data || {};
+            const item = this.document.createElement ? this.document.createElement('details') : null;
+            if (!item) return;
+            item.className = `tool-activity ${completed ? 'tool-complete' : 'tool-started'}`;
+            this.state.tools.activities.push({ event, completed });
+            const summary = this.document.createElement('summary');
+            summary.textContent = `${completed ? 'Result' : 'Call'}: ${data.tool_name || 'unknown tool'}`;
+            const payload = this.document.createElement('pre');
+            payload.textContent = JSON.stringify(data, null, 2);
+            item.appendChild(summary);
+            item.appendChild(payload);
+            this.ui.toolActivityList.appendChild(item);
         }
 
         _setStatusBox(state, text) {
@@ -517,6 +584,16 @@
                     this._updateElapsedDisplay();
                     break;
                 }
+
+                case 'tool_call_started':
+                    this._renderToolActivity(event, false);
+                    this._writeTerminal(`[TOOL] ${event.data && event.data.tool_name ? event.data.tool_name : 'tool'} started`);
+                    break;
+
+                case 'tool_call_completed':
+                    this._renderToolActivity(event, true);
+                    this._writeTerminal(`[TOOL] ${event.data && event.data.tool_name ? event.data.tool_name : 'tool'} completed`);
+                    break;
 
                 case 'input_required':
                     this.state.waitingForInput = true;

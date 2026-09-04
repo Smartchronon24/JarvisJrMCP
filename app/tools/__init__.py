@@ -11,7 +11,7 @@ Import this anywhere in Jarvis to access the registry::
 """
 
 from app.tools.registry import ToolRegistry
-from app.tools.models import ToolMetadata, ToolSnapshot
+from app.tools.models import ToolMetadata, ToolMetadataError, ToolSnapshot
 from app.tools.discovery import (
     DeterministicToolDiscovery,
     DiscoveryRequest,
@@ -31,6 +31,7 @@ tool_registry: ToolRegistry = ToolRegistry()
 __all__ = [
     "ToolRegistry",
     "ToolMetadata",
+    "ToolMetadataError",
     "ToolSnapshot",
     "ToolDiscovery",
     "DiscoveryRequest",

@@ -29,8 +29,11 @@ from __future__ import annotations
 import json
 import logging
 import time
+import asyncio
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
+from app.security.policy import redact_mapping
 
 if TYPE_CHECKING:
     from mcp import ClientSession
@@ -137,6 +140,10 @@ class ToolExecutionGateway:
         sessions: Mapping[str, ClientSession],
         tool_map: Mapping[str, tuple[str, Any]],
         on_tool_executed: Optional[Callable[[str, str, int, bool, Optional[str]], None]] = None,
+        authorize: Optional[Callable[[ToolMetadata, dict[str, Any]], bool]] = None,
+        authorize_server: Optional[Callable[[str], bool]] = None,
+        audit: Optional[Callable[[dict[str, Any]], None]] = None,
+        timeout_seconds: Optional[float] = 60.0,
     ):
         """
         Initialize the execution gateway.
@@ -161,6 +168,10 @@ class ToolExecutionGateway:
         self.sessions = sessions
         self.tool_map = tool_map
         self.on_tool_executed = on_tool_executed
+        self.authorize = authorize
+        self.authorize_server = authorize_server
+        self.audit = audit
+        self.timeout_seconds = timeout_seconds
 
     async def execute(
         self,
@@ -179,6 +190,9 @@ class ToolExecutionGateway:
         """
         arguments = arguments or {}
         t0 = time.time()
+        invocation_id = str(uuid.uuid4())
+        if self.audit is not None:
+            self.audit({"event": "tool_execution_started", "tool_name": tool_name, "invocation_id": invocation_id})
 
         if not isinstance(tool_name, str) or not tool_name.strip():
             return ExecutionResult.from_error(
@@ -221,6 +235,15 @@ class ToolExecutionGateway:
                 duration_ms=int((time.time() - t0) * 1000),
             )
 
+        if self.authorize is not None and not self.authorize(tool_meta, arguments):
+            return ExecutionResult.from_error(
+                status="forbidden",
+                error_type="authorization_denied",
+                message=f"[Authorization Error] Tool '{tool_name}' is not authorized",
+                retryable=False,
+                duration_ms=int((time.time() - t0) * 1000),
+            )
+
         if not tool_meta.available:
             logger.warning("[EXEC] Tool unavailable: %s", tool_name)
             return ExecutionResult.from_error(
@@ -233,6 +256,14 @@ class ToolExecutionGateway:
 
         # --- Step 3: Resolve the MCP server ---
         server_name = tool_meta.server
+        if self.authorize_server is not None and not self.authorize_server(server_name):
+            return ExecutionResult.from_error(
+                status="forbidden",
+                error_type="permission_rejection",
+                message=f"[Authorization Error] Server '{server_name}' is not authorized",
+                retryable=False,
+                duration_ms=int((time.time() - t0) * 1000),
+            )
         session = self.sessions.get(server_name)
         if session is None:
             logger.warning("[EXEC] Server not connected: %s for tool %s", server_name, tool_name)
@@ -282,11 +313,16 @@ class ToolExecutionGateway:
 
         # --- Step 6: Execute the tool via MCP ---
         real_tool_name = tool_meta.tool_name
-        logger.info("[EXEC] Executing %s::%s with arguments: %s", server_name, real_tool_name, arguments)
+        logger.info("[EXEC] Executing %s::%s invocation=%s arguments=%s", server_name, real_tool_name, invocation_id, redact_mapping(arguments))
 
         try:
             t_exec = time.time()
-            result = await session.call_tool(real_tool_name, arguments)
+            call = session.call_tool(real_tool_name, arguments)
+            result = (
+                await asyncio.wait_for(call, timeout=self.timeout_seconds)
+                if self.timeout_seconds
+                else await call
+            )
             duration_ms = int((time.time() - t_exec) * 1000)
         except Exception as exc:
             duration_ms = int((time.time() - t0) * 1000)
@@ -334,10 +370,60 @@ class ToolExecutionGateway:
         else:
             content_str = "(no content returned)"
 
+        # Many MCP tools return an application-level result envelope as JSON.
+        # MCP's transport-level is_error flag remains false when the tool
+        # handled the request but could not perform the requested operation.
+        # Preserve that distinction so callers cannot mistake {"success": false}
+        # for a completed external action.
+        application_result = None
+        try:
+            parsed = json.loads(content_str)
+            if isinstance(parsed, dict):
+                application_result = parsed
+        except (TypeError, json.JSONDecodeError):
+            pass
+
+        if application_result is not None and application_result.get("success") is False:
+            error_message = application_result.get("message") or application_result.get("error")
+            if not isinstance(error_message, str) or not error_message.strip():
+                error_message = content_str
+            error_type = application_result.get("error_type")
+            if not isinstance(error_type, str) or not error_type.strip():
+                error_type = "tool_error"
+            logger.warning("[EXEC] Tool application result reported failure: %s", error_message)
+            if self.on_tool_executed:
+                self.on_tool_executed(tool_name, real_tool_name, duration_ms, False, error_message)
+            if self.audit is not None:
+                self.audit({
+                    "event": "tool_execution_completed",
+                    "tool_name": tool_name,
+                    "invocation_id": invocation_id,
+                    "server": server_name,
+                    "duration_ms": duration_ms,
+                    "success": False,
+                    "error_type": error_type,
+                })
+            return ExecutionResult.from_error(
+                status="error",
+                error_type=error_type,
+                message=f"[Tool error] {error_message}",
+                retryable=False,
+                duration_ms=duration_ms,
+            )
+
         logger.info("[EXEC] Tool executed successfully: %s", tool_name)
         if self.on_tool_executed:
             self.on_tool_executed(tool_name, real_tool_name, duration_ms, True, None)
 
+        if self.audit is not None:
+            self.audit({
+                "event": "tool_execution_completed",
+                "tool_name": tool_name,
+                "invocation_id": invocation_id,
+                "server": server_name,
+                "duration_ms": duration_ms,
+                "success": True,
+            })
         return ExecutionResult(
             status="success",
             content=content_str,

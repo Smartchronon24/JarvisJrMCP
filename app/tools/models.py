@@ -27,7 +27,7 @@ def _normalize_text(value: Any, *, default: str = "") -> str:
     return text if text else default
 
 
-_SERVER_CAPABILITY_MAP: dict[str, str] = {
+SERVER_CAPABILITY_MAP: dict[str, str] = {
     "memory": "memory",
     "filesystem": "filesystem",
     "playwright": "browser",
@@ -39,10 +39,14 @@ _SERVER_CAPABILITY_MAP: dict[str, str] = {
 }
 
 
-def _guess_capability(server_name: str | None) -> str:
+def guess_capability(server_name: str | None) -> str:
     if not server_name:
         return "general"
-    return _SERVER_CAPABILITY_MAP.get(server_name, "general")
+    return SERVER_CAPABILITY_MAP.get(server_name, "general")
+
+
+class ToolMetadataError(ValueError):
+    """Raised when an MCP tool cannot be represented safely in the registry."""
 
 
 @dataclass
@@ -99,7 +103,7 @@ class ToolMetadata:
         self.name = _normalize_text(self.name)
         self.server = _normalize_text(self.server)
         self.tool_name = _normalize_text(self.tool_name)
-        self.capability = _normalize_text(self.capability) or _guess_capability(self.server)
+        self.capability = _normalize_text(self.capability) or guess_capability(self.server)
         self.description = _normalize_text(self.description)
 
         if not self.name:
@@ -115,7 +119,16 @@ class ToolMetadata:
             self.server, _ = self.name.split("__", 1)
 
         if not isinstance(self.input_schema, dict):
-            self.input_schema = {}
+            raise ToolMetadataError("input_schema must be an object")
+        properties = self.input_schema.get("properties")
+        if properties is not None and not isinstance(properties, dict):
+            raise ToolMetadataError("input_schema.properties must be an object")
+        required = self.input_schema.get("required")
+        if required is not None and (
+            not isinstance(required, list)
+            or any(not isinstance(name, str) or not name.strip() for name in required)
+        ):
+            raise ToolMetadataError("input_schema.required must be a list of names")
 
     @property
     def parameter_names(self) -> list[str]:
@@ -127,6 +140,24 @@ class ToolMetadata:
         if not isinstance(properties, dict):
             return []
         return [str(name).strip() for name in properties.keys() if str(name).strip()]
+
+    @property
+    def parameter_semantics(self) -> dict[str, str]:
+        """Expose schema-declared semantic hints without provider assumptions."""
+        properties = self.input_schema.get("properties", {})
+        semantics: dict[str, str] = {}
+        for name, schema in properties.items():
+            if isinstance(schema, dict):
+                semantic = schema.get("x-jarvis-semantic") or schema.get("semantic")
+                if isinstance(semantic, str) and semantic.strip():
+                    semantics[str(name)] = semantic.strip().lower()
+                    continue
+            normalized_name = str(name).strip().lower()
+            if normalized_name in {"phone", "phone_number", "telephone"}:
+                semantics[str(name)] = "phone"
+            elif normalized_name in {"identifier", "query", "search", "contact"}:
+                semantics[str(name)] = "identifier"
+        return semantics
 
     @property
     def search_terms(self) -> list[str]:
@@ -186,4 +217,3 @@ class ToolSnapshot:
 
     def __len__(self) -> int:
         return len(self.tools)
-

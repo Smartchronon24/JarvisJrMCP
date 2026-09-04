@@ -8,7 +8,15 @@ from app.runtime.adapters.claude import ClaudeAdapter
 from app.runtime.adapters.codex import CodexAdapter
 from app.runtime.adapters.copilot import CopilotAdapter
 from app.runtime.contract import FrameworkAdapter, FrameworkIdentity, RuntimeConfig
-from app.runtime.events import EventType, OutputEvent, ProcessCompletedEvent, ProcessFailedEvent, ProcessInterruptedEvent
+from app.runtime.events import (
+    EventType,
+    OutputEvent,
+    ProcessCompletedEvent,
+    ProcessFailedEvent,
+    ProcessInterruptedEvent,
+    ToolCallCompletedEvent,
+    ToolCallStartedEvent,
+)
 from app.runtime.executor import RuntimeProcess, RuntimeProcessExecutor, RuntimeProcessState
 
 
@@ -32,6 +40,27 @@ def test_approval_detector_ignores_user_prompt_echo():
     assert RuntimeProcess._looks_like_approval_required(
         "Approval required: allow this tool call?"
     )
+
+
+def test_runtime_process_normalizes_cli_mcp_markers():
+    process = object.__new__(RuntimeProcess)
+    process._tool_calls = {}
+
+    started = process._parse_tool_event('● jarvis_search (MCP: jarvis) · memory · query: "memory"')
+    assert isinstance(started, ToolCallStartedEvent)
+    assert started.tool_name == "jarvis__jarvis_search"
+    assert started.arguments == {"query": "memory"}
+
+    completed = process._parse_tool_event('└ {"ok":true,"operation":"search"}')
+    assert isinstance(completed, ToolCallCompletedEvent)
+    assert completed.tool_name == "jarvis__jarvis_search"
+    assert completed.result == {"ok": True, "operation": "search"}
+
+    process._tool_calls = {"jarvis__jarvis_search": ("call-2", 2)}
+    truncated = process._parse_tool_event('└ {"ok":false,"status":"capability_not_found","error":"...')
+    assert isinstance(truncated, ToolCallCompletedEvent)
+    assert truncated.is_error is True
+    assert '"capability_not_found"' in truncated.result
 
 
 class ClaudeEnvironmentProbe(ClaudeAdapter):
@@ -109,6 +138,40 @@ async def test_runtime_process_streams_stdout_and_stderr():
     assert stdout_event.stream in {"stdout", "stderr"}
     code = await proc.wait()
     assert code == 0
+
+
+@pytest.mark.asyncio
+async def test_wait_for_event_preserves_unmatched_events():
+    adapter = EchoAdapter()
+    proc = await RuntimeProcessExecutor.execute(
+        adapter,
+        RuntimeConfig(
+            executable_path=sys.executable,
+            extra={"script": "print('hello')"},
+        ),
+    )
+
+    output = await proc.wait_for_event(EventType.OUTPUT, timeout=2)
+    assert isinstance(output, OutputEvent)
+    started = await proc.wait_for_event(EventType.PROCESS_STARTED, timeout=2)
+    assert started.event_type == EventType.PROCESS_STARTED
+    await proc.wait()
+
+
+@pytest.mark.asyncio
+async def test_wait_timeout_does_not_leave_process_running():
+    adapter = EchoAdapter()
+    proc = await RuntimeProcessExecutor.execute(
+        adapter,
+        RuntimeConfig(
+            executable_path=sys.executable,
+            extra={"script": "import time; time.sleep(60)"},
+        ),
+    )
+
+    with pytest.raises(TimeoutError, match="did not complete"):
+        await proc.wait(timeout=0.05)
+    await proc.terminate(timeout=2)
 
 
 @pytest.mark.asyncio

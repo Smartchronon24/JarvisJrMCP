@@ -224,14 +224,17 @@ class JarvisToolGateway:
                         target = f"{target}.com"
                     arguments[parameter_names["url"]] = f"https://{target}"
 
-        phone_match = re.search(
-            r"(?<!\w)\+?[0-9][0-9()\s.-]{6,}[0-9](?!\w)", request
+        semantic_priority = {"phone": 0, "phone_number": 0, "email": 1, "identifier": 2, "query": 3, "search": 3}
+        semantic_items = sorted(
+            metadata.parameter_semantics.items(),
+            key=lambda item: semantic_priority.get(item[1], 99),
         )
-        if phone_match:
-            phone = re.sub(r"[()\s.-]", "", phone_match.group(0))
-            for name in ("phone_number", "phone", "identifier", "query"):
-                schema_name = parameter_names.get(name)
-                if schema_name and schema_name not in arguments:
-                    arguments[schema_name] = phone
+        for schema_name, semantic in semantic_items:
+            if schema_name in arguments:
+                continue
+            if semantic in {"phone", "phone_number", "email", "identifier", "query", "search"}:
+                value_match = re.search(r"(?<!\w)(?:\+?[0-9][0-9()\s.-]{6,}[0-9]|[\w.+-]+@[\w.-]+)(?!\w)", request)
+                if value_match:
+                    arguments[schema_name] = re.sub(r"[()\s.-]", "", value_match.group(0))
                     break
         return arguments

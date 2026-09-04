@@ -23,6 +23,7 @@ class ClaudexWebSocketClient {
         this.maxReconnectAttempts = 3;
         this.reconnectDelay = 1000;
         this._pendingStart = false;
+        this._intentionalDisconnect = false;
         
         // Callbacks
         this.onConnected = options.onConnected || null;
@@ -39,6 +40,7 @@ class ClaudexWebSocketClient {
      * Connect to the WebSocket server
      */
     connect() {
+        this._intentionalDisconnect = false;
         try {
             this.ws = new WebSocket(this.wsUrl);
             
@@ -66,7 +68,7 @@ class ClaudexWebSocketClient {
             this.ws.onclose = () => {
                 console.log('WebSocket closed');
                 if (this.onDisconnected) this.onDisconnected();
-                this._attemptReconnect();
+                if (!this._intentionalDisconnect) this._attemptReconnect();
             };
         } catch (err) {
             console.error('Failed to create WebSocket:', err);
@@ -91,6 +93,7 @@ class ClaudexWebSocketClient {
      * Disconnect from WebSocket
      */
     disconnect() {
+        this._intentionalDisconnect = true;
         if (this.ws) {
             this.ws.close();
             this.ws = null;

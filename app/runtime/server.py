@@ -522,11 +522,13 @@ class RuntimeServer:
         Monitor orchestrator for terminal state and clean up when complete.
         """
         try:
-            timeout_value = os.environ.get("JARVIS_RUNTIME_TIMEOUT_SECONDS", "120")
-            try:
-                timeout_seconds = max(1.0, float(timeout_value))
-            except ValueError:
-                timeout_seconds = 120.0
+            timeout_seconds = orchestrator.config.timeout_seconds
+            if timeout_seconds is None:
+                timeout_value = os.environ.get("JARVIS_RUNTIME_TIMEOUT_SECONDS", "120")
+                try:
+                    timeout_seconds = max(1.0, float(timeout_value))
+                except ValueError:
+                    timeout_seconds = 120.0
 
             async def wait_for_terminal() -> None:
                 while not orchestrator.state_machine.is_terminal():

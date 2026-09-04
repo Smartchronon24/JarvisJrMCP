@@ -12,12 +12,55 @@ class EventType(Enum):
     PROCESS_COMPLETED = "process_completed"
     PROCESS_FAILED = "process_failed"
     PROCESS_INTERRUPTED = "process_interrupted"
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_COMPLETED = "tool_call_completed"
 
 @dataclass
 class RuntimeEvent:
     """Base class for normalized runtime events emitted by framework adapters."""
     event_type: EventType
     timestamp_ms: int
+
+
+@dataclass
+class ToolCallStartedEvent(RuntimeEvent):
+    tool_name: str
+    call_id: Optional[str] = None
+    arguments: Optional[dict] = None
+
+    def __init__(
+        self,
+        timestamp_ms: int,
+        tool_name: str,
+        call_id: Optional[str] = None,
+        arguments: Optional[dict] = None,
+    ):
+        super().__init__(EventType.TOOL_CALL_STARTED, timestamp_ms)
+        self.tool_name = tool_name
+        self.call_id = call_id
+        self.arguments = arguments or {}
+
+
+@dataclass
+class ToolCallCompletedEvent(RuntimeEvent):
+    tool_name: str
+    call_id: Optional[str] = None
+    result: object = None
+    is_error: bool = False
+
+    def __init__(
+        self,
+        timestamp_ms: int,
+        tool_name: str,
+        call_id: Optional[str] = None,
+        result: object = None,
+        is_error: bool = False,
+    ):
+        super().__init__(EventType.TOOL_CALL_COMPLETED, timestamp_ms)
+        self.tool_name = tool_name
+        self.call_id = call_id
+        self.result = result
+        self.is_error = is_error
 
 @dataclass
 class ProcessStartedEvent(RuntimeEvent):

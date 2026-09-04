@@ -33,7 +33,11 @@ Inbound (browser → server):
 
 Outbound (server → browser):
 
-    RuntimeSessionEvent.to_dict()  — see B6 RuntimeSessionEvent
+    RuntimeSessionEvent.to_dict()  — see B6 RuntimeSessionEvent. Every event
+    includes protocol_version, run_id, timestamp_ms, framework, state, and data.
+    Standard data event types include output, tool_call_started,
+    tool_call_completed, input_required, approval_required, error,
+    process_completed, process_failed, and process_cancelled.
 
 Error frame:
 

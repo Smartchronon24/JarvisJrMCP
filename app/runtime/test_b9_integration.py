@@ -185,13 +185,21 @@ class TestCopilotAdapterValidation:
         cfg = RuntimeConfig(executable_path=COPILOT_EXE, prompt="hello", interactive=False)
         cmd = self._adapter().build_command(cfg)
         # Real CLI: -p, --prompt <text>
-        assert "--prompt" in cmd or "-p" in cmd
+        assert "--prompt" in cmd or "-p" in cmd or any(
+            value.startswith("-p=") for value in cmd
+        )
 
     def test_prompt_value_follows_flag(self):
         cfg = RuntimeConfig(executable_path=COPILOT_EXE, prompt="hello world", interactive=False)
         cmd = self._adapter().build_command(cfg)
-        flag_idx = cmd.index("--prompt") if "--prompt" in cmd else cmd.index("-p")
-        assert cmd[flag_idx + 1] == "hello world"
+        if "--prompt" in cmd:
+            flag_idx = cmd.index("--prompt")
+            assert cmd[flag_idx + 1] == "hello world"
+        elif "-p" in cmd:
+            flag_idx = cmd.index("-p")
+            assert cmd[flag_idx + 1] == "hello world"
+        else:
+            assert "-p=hello world" in cmd
 
     def test_model_flag(self):
         cfg = RuntimeConfig(executable_path=COPILOT_EXE, prompt="hi", model_name="gpt-4")

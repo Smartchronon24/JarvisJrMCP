@@ -113,6 +113,67 @@ body {
     flex-direction: column;
 }
 
+.tool-panel {
+    max-height: 34%;
+    overflow-y: auto;
+    padding: 0.75rem;
+    background: #111827;
+    border-top: 1px solid var(--border-color);
+}
+
+.tool-panel h2 {
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.tool-activity-list details {
+    margin: 0.35rem 0;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: #1f2937;
+}
+
+.tool-activity-list summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.tool-activity-list pre {
+    margin-top: 0.5rem;
+    white-space: pre-wrap;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+}
+
+.panel-status {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+}
+
+.session-actions {
+    margin-top: 0.65rem;
+}
+
+.memory-list {
+    margin-top: 0.5rem;
+    max-height: 8rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 800px) {
+    .main-layout { flex-direction: column; }
+    .dashboard-panel, .terminal-panel { width: 100%; }
+    .dashboard-panel { max-height: 55vh; }
+    .terminal-panel { min-height: 45vh; }
+}
+
 .terminal-toolbar {
     display: flex;
     justify-content: flex-end;

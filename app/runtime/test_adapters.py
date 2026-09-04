@@ -1,5 +1,5 @@
 import pytest
-from app.runtime.contract import RuntimeConfig, FrameworkIdentity
+from app.runtime.contract import RuntimeConfig, FrameworkIdentity, RuntimeContractError
 from app.runtime.adapters.claude import ClaudeAdapter
 from app.runtime.adapters.codex import CodexAdapter
 from app.runtime.adapters.copilot import CopilotAdapter
@@ -16,6 +16,31 @@ def test_runtime_config_representation():
     assert config.prompt == "hello world"
     assert config.model_name == "claude-3-opus"
     assert config.environment["API_KEY"] == "secret"
+
+
+def test_runtime_config_rejects_invalid_environment_values():
+    config = RuntimeConfig(
+        executable_path="claude",
+        prompt="hello",
+        environment={"PORT": 8000},
+    )
+
+    with pytest.raises(RuntimeContractError, match="environment keys and values"):
+        config.validate()
+
+
+def test_runtime_adapter_contract_rejects_blank_prompt():
+    config = RuntimeConfig(executable_path="claude", prompt=" ")
+
+    with pytest.raises(RuntimeContractError, match="prompt must not be empty"):
+        ClaudeAdapter().validate_config(config)
+
+
+def test_runtime_config_rejects_invalid_timeout():
+    config = RuntimeConfig(executable_path="copilot", timeout_seconds=0)
+
+    with pytest.raises(RuntimeContractError, match="timeout_seconds"):
+        config.validate()
 
 def test_claude_adapter():
     adapter = ClaudeAdapter()

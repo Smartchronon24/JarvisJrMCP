@@ -483,6 +483,24 @@ async def test_execute_handles_isError_attribute(gateway):
     assert result.is_error is True
 
 
+@pytest.mark.asyncio
+async def test_execute_treats_application_failure_envelope_as_error(gateway):
+    """Tool-level success=false must not become a gateway success."""
+    result_mock = MagicMock()
+    result_mock.is_error = False
+    result_mock.content = [
+        MagicMock(text='{"success": false, "message": "recipient not found"}')
+    ]
+    gateway.sessions["test"].call_tool.return_value = result_mock
+
+    result = await gateway.execute("test__search", {"query": "test"})
+
+    assert result.status == "error"
+    assert result.is_error is True
+    assert result.error_type == "tool_error"
+    assert "recipient not found" in result.content
+
+
 # --- Integration-style test ---
 
 

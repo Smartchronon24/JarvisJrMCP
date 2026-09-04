@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Optional
@@ -22,6 +23,8 @@ from app.runtime.events import (
     ProcessInterruptedEvent,
     ProcessStartedEvent,
     RuntimeEvent,
+    ToolCallCompletedEvent,
+    ToolCallStartedEvent,
 )
 
 
@@ -53,6 +56,7 @@ class RuntimeProcess:
         self.process = process
         self.state = RuntimeProcessState.STARTING
         self.events: asyncio.Queue[RuntimeEvent] = asyncio.Queue()
+        self._deferred_events: deque[RuntimeEvent] = deque()
         self._completion = asyncio.Event()
         self._stdout_task: Optional[asyncio.Task[None]] = None
         self._stderr_task: Optional[asyncio.Task[None]] = None
@@ -62,6 +66,7 @@ class RuntimeProcess:
         self._failure_reason: Optional[str] = None
         self._cleanup_lock = asyncio.Lock()
         self._cleaned_up = False
+        self._tool_calls: dict[str, tuple[str, int]] = {}
         self.started_at_ms = self._now_ms()
 
     @property
@@ -114,6 +119,34 @@ class RuntimeProcess:
             return True
         return bool(("?" in text or ":" in text) and any(keyword in lower for keyword in ("type", "enter", "reply", "response")))
 
+    def _parse_tool_event(self, text: str) -> Optional[RuntimeEvent]:
+        """Parse provider-neutral tool markers emitted by CLIs that expose MCP calls as text."""
+        marker = re.search(r"(?:●|•)\s+([A-Za-z0-9_.-]+)\s+\(MCP:\s*([^)]+)\)", text)
+        if marker:
+            tool_name = f"{marker.group(2).strip()}__{marker.group(1)}"
+            call_id = f"{tool_name}:{self._now_ms()}"
+            self._tool_calls[tool_name] = (call_id, self._now_ms())
+            arguments = {}
+            query = re.search(r"\bquery:\s*[\"']?([^\"']+)[\"']?", text)
+            if query:
+                arguments["query"] = query.group(1).strip()
+            return ToolCallStartedEvent(self._now_ms(), tool_name, call_id, arguments)
+
+        result_marker = re.search(r"└\s+(\{.*)(?:\})?\s*$", text)
+        if result_marker and self._tool_calls:
+            tool_name, (call_id, _) = next(reversed(self._tool_calls.items()))
+            try:
+                import json
+                result = json.loads(result_marker.group(1))
+            except json.JSONDecodeError:
+                result = result_marker.group(1)
+            self._tool_calls.pop(tool_name, None)
+            is_error = (
+                isinstance(result, dict) and result.get("ok") is False
+            ) or ('"ok":false' in str(result).replace(" ", ""))
+            return ToolCallCompletedEvent(self._now_ms(), tool_name, call_id, result, is_error)
+        return None
+
     async def _read_stream(self, stream: Optional[asyncio.StreamReader], stream_name: str) -> None:
         if stream is None:
             return
@@ -125,6 +158,9 @@ class RuntimeProcess:
                 text = line.decode("utf-8", errors="replace").rstrip("\r\n")
                 if not text:
                     continue
+                tool_event = self._parse_tool_event(text)
+                if tool_event is not None:
+                    await self._emit(tool_event)
                 event = OutputEvent(self._now_ms(), text, stream_name)
                 await self._emit(event)
                 if self._looks_like_approval_required(text):
@@ -165,6 +201,8 @@ class RuntimeProcess:
         await self._emit(ProcessStartedEvent(self._now_ms(), self.process.pid, self.adapter.get_identity().name.lower()))
 
     async def send_input(self, data: str) -> None:
+        if not isinstance(data, str):
+            raise RuntimeExecutionError("Process input must be a string")
         if self.process.stdin is None:
             raise RuntimeExecutionError("Process has no stdin handle")
         if self.process.returncode is not None:
@@ -173,18 +211,33 @@ class RuntimeProcess:
         await self.process.stdin.drain()
 
     async def wait_for_event(self, event_type: Optional[Any] = None, timeout: Optional[float] = None) -> RuntimeEvent:
-        if timeout is None:
-            return await self.events.get()
-        try:
-            event = await asyncio.wait_for(self.events.get(), timeout=timeout)
-        except asyncio.TimeoutError as exc:  # pragma: no cover - requires timing-specific failure
-            raise TimeoutError("Event was not received in time") from exc
-        if event_type is None or event.event_type == event_type:
-            return event
-        return await self.wait_for_event(event_type, timeout=timeout)
+        deadline = None if timeout is None else asyncio.get_running_loop().time() + timeout
+        while True:
+            if self._deferred_events:
+                pending = list(self._deferred_events)
+                self._deferred_events.clear()
+                for index, pending_event in enumerate(pending):
+                    if event_type is None or pending_event.event_type == event_type:
+                        self._deferred_events.extend(pending[index + 1:])
+                        return pending_event
+                self._deferred_events.extend(pending)
 
-    async def wait(self) -> int:
-        await self._completion.wait()
+            remaining = None if deadline is None else deadline - asyncio.get_running_loop().time()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError("Event was not received in time")
+            try:
+                event = await asyncio.wait_for(self.events.get(), timeout=remaining)
+            except asyncio.TimeoutError as exc:  # pragma: no cover
+                raise TimeoutError("Event was not received in time") from exc
+            if event_type is None or event.event_type == event_type:
+                return event
+            self._deferred_events.append(event)
+
+    async def wait(self, timeout: Optional[float] = None) -> int:
+        try:
+            await asyncio.wait_for(self._completion.wait(), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError("Process did not complete in time") from exc
         if self.process.returncode is None:
             return 0
         return self.process.returncode
@@ -332,6 +385,7 @@ class RuntimeProcessExecutor:
 
     @staticmethod
     def _resolve_command(adapter: FrameworkAdapter, config: RuntimeConfig) -> list[str]:
+        adapter.validate_config(config)
         command = adapter.build_command(config)
         if not command:
             raise RuntimeExecutionError("Adapter produced an empty command")
@@ -365,8 +419,10 @@ class RuntimeProcessExecutor:
     ) -> RuntimeProcess:
         import hashlib
         
-        if not config.executable_path:
-            raise RuntimeExecutionError("RuntimeConfig.executable_path is required")
+        try:
+            adapter.validate_config(config)
+        except ValueError as exc:
+            raise RuntimeExecutionError(str(exc)) from exc
 
         merged_env = os.environ.copy()
         merged_env.update(adapter.build_environment(config))

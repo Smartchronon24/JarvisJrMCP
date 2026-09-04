@@ -37,6 +37,7 @@ from app.tools.discovery import DiscoveryRequest, tool_discovery
 from app.tools.execution import ToolExecutionGateway
 from app.tools.models import ToolSnapshot
 from app.tools.selector import selector
+from app.state import ConversationMessage, PersistentStateStore, SharedSession
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -75,9 +76,24 @@ class JarvisAgent:
         self.tool_map: dict[str, tuple[str, any]] = {} # scoped_tool_key → (server_name, mcp_tool)
         self.llm_tools: list[dict] = []                # full provider-formatted tools
         self.enabled_mcps: set[str] = set()            # which servers are currently enabled
-        self.conversation: list[dict] = [              # message history
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ]
+        self.state_store = PersistentStateStore(
+            os.environ.get("JARVIS_STATE_DB", "data/jarvis_state.db")
+        )
+        self.shared_session = SharedSession(
+            user_id=os.environ.get("JARVIS_USER_ID", "default-user"),
+            conversation_id=os.environ.get("JARVIS_CONVERSATION_ID", "default-conversation"),
+            active_framework="jarvis",
+        )
+        self.state_store.save_session(self.shared_session)
+        persisted = self.state_store.list_messages(self.shared_session.conversation_id)
+        self.conversation: list[dict] = [
+            {"role": message.role, "content": message.content}
+            for message in persisted
+        ] or [{"role": "system", "content": SYSTEM_PROMPT}]
+        if not persisted:
+            self.state_store.append_message(
+                ConversationMessage(self.shared_session.conversation_id, "system", SYSTEM_PROMPT)
+            )
         self._exit_stack = AsyncExitStack()
         self._cancel_requested = False  # set True to stop current generation
 
@@ -88,6 +104,21 @@ class JarvisAgent:
             tool_map=self.tool_map,
             on_tool_executed=self._record_tool_usage,
         )
+
+    def _append_message(self, message: dict) -> None:
+        """Keep the in-memory provider transcript and durable transcript aligned."""
+        self.conversation.append(message)
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            self.state_store.append_message(
+                ConversationMessage(
+                    self.shared_session.conversation_id,
+                    str(message.get("role", "assistant")),
+                    content,
+                    framework=self.shared_session.active_framework,
+                    runtime_session_id=self.shared_session.runtime_session_id,
+                )
+            )
 
     def request_cancel(self):
         """Signal the current streaming generation to stop after the next token."""
@@ -327,7 +358,7 @@ class JarvisAgent:
 
     async def chat(self, user_message: str) -> str:
         """Send a message, handle any tool calls, stream the reply to stdout."""
-        self.conversation.append({"role": "user", "content": user_message})
+        self._append_message({"role": "user", "content": user_message})
 
         print("\n  [LLM] Processing request...")
 
@@ -401,7 +432,7 @@ class JarvisAgent:
                     }
                     for tc in tool_calls
                 ]
-                self.conversation.append(assistant_entry)
+                self._append_message(assistant_entry)
                 # Execute each tool and append results
                 for tc in tool_calls:
                     scoped_name = tc.function.name
@@ -410,7 +441,7 @@ class JarvisAgent:
                     print(f"\n  [LLM] Requesting tool: {scoped_name}")
                     tool_result = await self.execute_tool(scoped_name, arguments)
 
-                    self.conversation.append({
+                    self._append_message({
                         "role": "tool",
                         "content": tool_result,
                     })
@@ -421,7 +452,7 @@ class JarvisAgent:
 
             # --- Plain reply ---
             reply = content.strip()
-            self.conversation.append({"role": "assistant", "content": reply})
+            self._append_message({"role": "assistant", "content": reply})
             return reply
 
     # ------------------------------------------------------------------
@@ -522,7 +553,7 @@ class JarvisAgent:
             if cancelled:
                 reply = content.strip()
                 if reply:
-                    self.conversation.append({"role": "assistant", "content": reply})
+                    self._append_message({"role": "assistant", "content": reply})
                 if emitted_assistant_start:
                     yield {"type": "assistant_complete", "agent": "jarvis"}
                 yield {"type": "request_complete", "agent": "jarvis", "cancelled": True}
@@ -536,7 +567,7 @@ class JarvisAgent:
                     {"function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                     for tc in tool_calls
                 ]
-                self.conversation.append(assistant_entry)
+                self._append_message(assistant_entry)
 
                 for tc in tool_calls:
                     scoped_name = tc.function.name
@@ -560,7 +591,7 @@ class JarvisAgent:
 
                     try:
                         result = await self.execute_tool(scoped_name, arguments)
-                        self.conversation.append({"role": "tool", "content": result})
+                        self._append_message({"role": "tool", "content": result})
                         
                         result_str = str(result)
                         if len(result_str) > 200:
@@ -579,7 +610,7 @@ class JarvisAgent:
                     except Exception as exc:
                         error_msg = str(exc)
                         print(f"\n[JARVIS] Fallback Tool execution failed: {scoped_name} - {error_msg}")
-                        self.conversation.append({"role": "tool", "content": f"[Error] {error_msg}"})
+                        self._append_message({"role": "tool", "content": f"[Error] {error_msg}"})
                         yield {
                             "type": "tool_call_error",
                             "agent": "jarvis",
@@ -592,7 +623,7 @@ class JarvisAgent:
                 continue
 
             reply = content.strip()
-            self.conversation.append({"role": "assistant", "content": reply})
+            self._append_message({"role": "assistant", "content": reply})
             if emitted_assistant_start:
                 yield {"type": "assistant_complete", "agent": "jarvis"}
             yield {"type": "request_complete", "agent": "jarvis"}
@@ -633,7 +664,7 @@ class JarvisAgent:
         print("[JARVIS] New request")
         print(f"[JARVIS] User: {user_message!r}")
 
-        self.conversation.append({"role": "user", "content": user_message})
+        self._append_message({"role": "user", "content": user_message})
         yield {"type": "request_start", "agent": "jarvis"}
 
         planner = Planner()
@@ -695,7 +726,7 @@ class JarvisAgent:
         if decision.get("action") == "respond":
             response_text = decision["response"]
             print("[ROUTER] Decision: direct_response")
-            self.conversation.append({"role": "assistant", "content": response_text})
+            self._append_message({"role": "assistant", "content": response_text})
             yield {"type": "assistant_start", "agent": "jarvis"}
             if response_text:
                 yield {"type": "assistant_delta", "agent": "jarvis", "content": response_text}
@@ -883,7 +914,7 @@ class JarvisAgent:
             if cancelled:
                 reply = content.strip()
                 if reply:
-                    self.conversation.append({"role": "assistant", "content": reply})
+                    self._append_message({"role": "assistant", "content": reply})
                 if emitted_assistant_start:
                     yield {"type": "assistant_complete", "agent": "jarvis"}
                 yield {"type": "request_complete", "agent": "jarvis", "cancelled": True}
@@ -915,7 +946,7 @@ class JarvisAgent:
                     {"function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                     for tc in tool_calls
                 ]
-                self.conversation.append(assistant_entry)
+                self._append_message(assistant_entry)
 
                 for tc in tool_calls:
                     scoped_name = tc.function.name
@@ -937,7 +968,7 @@ class JarvisAgent:
                             "This call has been blocked by the tool-isolation guard."
                         )
                         print(f"\n[WORKER] Tool call BLOCKED (Tool isolation guard): {scoped_name}")
-                        self.conversation.append({"role": "tool", "content": f"[Blocked] {error_msg}"})
+                        self._append_message({"role": "tool", "content": f"[Blocked] {error_msg}"})
                         yield {
                             "type": "tool_call_error",
                             "agent": "worker",
@@ -962,7 +993,7 @@ class JarvisAgent:
 
                     try:
                         result = await self.execute_tool(scoped_name, arguments)
-                        self.conversation.append({"role": "tool", "content": result})
+                        self._append_message({"role": "tool", "content": result})
                         
                         result_str = str(result)
                         if len(result_str) > 200:
@@ -981,7 +1012,7 @@ class JarvisAgent:
                     except Exception as exc:
                         error_msg = str(exc)
                         print(f"\n[WORKER] Tool execution failed: {scoped_name} - {error_msg}")
-                        self.conversation.append({"role": "tool", "content": f"[Error] {error_msg}"})
+                        self._append_message({"role": "tool", "content": f"[Error] {error_msg}"})
                         yield {
                             "type": "tool_call_error",
                             "agent": "worker",
@@ -996,7 +1027,7 @@ class JarvisAgent:
 
             # --- Plain assistant reply, loop ends ---
             reply = content.strip()
-            self.conversation.append({"role": "assistant", "content": reply})
+            self._append_message({"role": "assistant", "content": reply})
 
             if emitted_assistant_start:
                 yield {"type": "assistant_complete", "agent": "jarvis"}

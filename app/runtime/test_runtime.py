@@ -17,6 +17,8 @@ from app.runtime.events import (
     ProcessFailedEvent,
     ProcessInterruptedEvent,
     ErrorEvent,
+    ToolCallStartedEvent,
+    ToolCallCompletedEvent,
 )
 from app.runtime.runtime import (
     RuntimeExecutionState,
@@ -284,6 +286,43 @@ class TestRuntimeSessionOrchestrator:
         assert session_event.event_type == "output"
         assert session_event.data["stream"] == "stdout"
         assert session_event.data["text"] == "hello"
+
+    async def test_orchestrator_normalizes_tool_call_events(self):
+        config = RuntimeConfig(executable_path="python")
+        orch = RuntimeSessionOrchestrator(config, FrameworkIdentity.COPILOT)
+        await orch.handle_executor_event(
+            ProcessStartedEvent(timestamp_ms=1000, pid=1234, framework="copilot")
+        )
+        while True:
+            try:
+                await asyncio.wait_for(orch.get_session_event(), timeout=0.01)
+            except asyncio.TimeoutError:
+                break
+
+        await orch.handle_executor_event(
+            ToolCallStartedEvent(
+                timestamp_ms=2000,
+                tool_name="browser_navigate",
+                call_id="call-1",
+                arguments={"url": "https://example.com"},
+            )
+        )
+        started = await asyncio.wait_for(orch.get_session_event(), timeout=1)
+        assert started.event_type == "tool_call_started"
+        assert started.to_dict()["protocol_version"] == "1"
+        assert started.data["call_id"] == "call-1"
+
+        await orch.handle_executor_event(
+            ToolCallCompletedEvent(
+                timestamp_ms=3000,
+                tool_name="browser_navigate",
+                call_id="call-1",
+                result={"ok": True},
+            )
+        )
+        completed = await asyncio.wait_for(orch.get_session_event(), timeout=1)
+        assert completed.event_type == "tool_call_completed"
+        assert completed.data["result"] == {"ok": True}
 
     async def test_orchestrator_handles_stderr_output(self):
         config = RuntimeConfig(executable_path="python")

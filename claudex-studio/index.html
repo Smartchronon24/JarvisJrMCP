@@ -88,6 +88,18 @@
                     </div>
                 </section>
 
+                <section class="dashboard-section" aria-labelledby="sessionHeading">
+                    <h2 id="sessionHeading">Jarvis Session</h2>
+                    <div class="info-grid">
+                        <div class="info-row"><label>Identity:</label><span id="jarvisIdentity" class="value">Jarvis</span></div>
+                        <div class="info-row"><label>Conversation:</label><span id="conversationId" class="value code">default-conversation</span></div>
+                    </div>
+                    <div class="action-area session-actions">
+                        <button id="resumeBtn" class="btn btn-secondary">Resume conversation</button>
+                        <button id="hotSwapBtn" class="btn btn-secondary">Hot-swap framework</button>
+                    </div>
+                </section>
+
                 <!-- Session Start -->
                 <section class="dashboard-section">
                     <h2>Start Session</h2>
@@ -154,6 +166,12 @@
                         <span id="errorMessage"></span>
                     </div>
                 </section>
+
+                <section class="dashboard-section" aria-labelledby="memoryHeading">
+                    <h2 id="memoryHeading">Conversation &amp; Memory</h2>
+                    <div id="conversationStatus" class="panel-status" aria-live="polite">History is loaded per conversation.</div>
+                    <div id="memoryList" class="memory-list" aria-live="polite"></div>
+                </section>
             </div>
 
             <!-- Right Panel: Terminal (60%) -->
@@ -164,6 +182,11 @@
                 <div id="terminal" class="terminal-container">
                     <pre id="terminalFallback" class="terminal-fallback" aria-live="polite"></pre>
                 </div>
+                <aside class="tool-panel" aria-labelledby="toolActivityHeading">
+                    <h2 id="toolActivityHeading">Jarvis Tool Activity</h2>
+                    <div id="toolActivityEmpty" class="panel-status">No tool activity yet.</div>
+                    <div id="toolActivityList" class="tool-activity-list" aria-live="polite"></div>
+                </aside>
             </div>
         </div>
     </div>

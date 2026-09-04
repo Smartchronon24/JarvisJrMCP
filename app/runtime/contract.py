@@ -15,6 +15,19 @@ class RuntimeContractError(ValueError):
     """Raised when a runtime launch request violates the common contract."""
 
 
+@dataclass(frozen=True)
+class AdapterCapabilities:
+    """Framework capabilities exposed without leaking CLI-specific behavior."""
+
+    supports_mcp: bool = False
+    supports_tool_calls: bool = False
+    supports_interactive_input: bool = True
+    supports_cancellation: bool = True
+    requires_authentication: bool = False
+    experimental: bool = False
+    experimental_reason: Optional[str] = None
+
+
 @dataclass
 class RuntimeConfig:
     """
@@ -34,6 +47,7 @@ class RuntimeConfig:
     
     # Auth or session flags if needed broadly, though specifics go to adapters
     interactive: bool = False
+    timeout_seconds: Optional[float] = None
     
     # Additional framework-specific kwargs should be avoided in the common contract,
     # but could be passed if strictly necessary via a dict.
@@ -62,6 +76,11 @@ class RuntimeConfig:
             raise RuntimeContractError("endpoint_url must be a string when provided")
         if not isinstance(self.interactive, bool):
             raise RuntimeContractError("interactive must be a boolean")
+        if self.timeout_seconds is not None and (
+            not isinstance(self.timeout_seconds, (int, float))
+            or self.timeout_seconds <= 0
+        ):
+            raise RuntimeContractError("timeout_seconds must be positive when provided")
         if not isinstance(self.extra, dict):
             raise RuntimeContractError("extra must be an object")
 
@@ -75,6 +94,10 @@ class FrameworkAdapter(abc.ABC):
     def get_identity(self) -> FrameworkIdentity:
         """Return the framework identity this adapter supports."""
         pass
+
+    def get_capabilities(self) -> AdapterCapabilities:
+        """Return declared capabilities for shared orchestration and testing."""
+        return AdapterCapabilities()
 
     def validate_config(self, config: RuntimeConfig) -> None:
         """Validate a request before framework-specific command construction."""

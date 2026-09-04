@@ -1261,6 +1261,29 @@ func handleMessageRevoke(messageStore *MessageStore, msg *waProto.Message, chatJ
 	}
 }
 
+func normalizePhoneRecipient(recipient string) (string, error) {
+	trimmed := strings.TrimSpace(recipient)
+	if trimmed == "" {
+		return "", fmt.Errorf("invalid phone recipient %q", recipient)
+	}
+
+	var digits strings.Builder
+	for _, r := range trimmed {
+		switch {
+		case r >= '0' && r <= '9':
+			digits.WriteRune(r)
+		case r == '+' || r == '-' || r == '(' || r == ')' || r == ' ' || r == '\t':
+			// Accept common display formatting, but omit it from the JID.
+		default:
+			return "", fmt.Errorf("invalid character in phone recipient %q", recipient)
+		}
+	}
+	if digits.Len() == 0 {
+		return "", fmt.Errorf("invalid phone recipient %q", recipient)
+	}
+	return digits.String(), nil
+}
+
 // resolveRecipientJID parses a phone number or JID string and resolves PN -> LID
 // for personal chats before sending.
 func resolveRecipientJID(client *whatsmeow.Client, recipient string) (types.JID, error) {
@@ -1273,8 +1296,12 @@ func resolveRecipientJID(client *whatsmeow.Client, recipient string) (types.JID,
 			return types.JID{}, fmt.Errorf("Error parsing JID: %v", err)
 		}
 	} else {
+		normalized, normalizeErr := normalizePhoneRecipient(recipient)
+		if normalizeErr != nil {
+			return types.JID{}, normalizeErr
+		}
 		recipientJID = types.JID{
-			User:   recipient,
+			User:   normalized,
 			Server: "s.whatsapp.net", // For personal chats
 		}
 	}
@@ -1351,8 +1378,12 @@ func sendWhatsAppMessage(client *whatsmeow.Client, messageStore *MessageStore, r
 			return false, fmt.Sprintf("Error parsing JID: %v", err)
 		}
 	} else {
+		normalized, normalizeErr := normalizePhoneRecipient(recipient)
+		if normalizeErr != nil {
+			return false, normalizeErr.Error()
+		}
 		settingsLookupJID = types.JID{
-			User:   recipient,
+			User:   normalized,
 			Server: "s.whatsapp.net", // For personal chats
 		}
 	}

@@ -288,6 +288,22 @@ func TestResolveRecipientJIDResolvesPhoneToCachedLID(t *testing.T) {
 	}
 }
 
+func TestResolveRecipientJIDNormalizesFormattedPhone(t *testing.T) {
+	got, err := normalizePhoneRecipient("+91 73582-47243")
+	if err != nil {
+		t.Fatalf("normalizePhoneRecipient returned error: %v", err)
+	}
+	if got != "917358247243" {
+		t.Fatalf("expected normalized phone 917358247243, got %s", got)
+	}
+}
+
+func TestNormalizePhoneRecipientRejectsUnexpectedCharacters(t *testing.T) {
+	if _, err := normalizePhoneRecipient("917358247423 ext 1"); err == nil {
+		t.Fatal("expected invalid phone formatting to be rejected")
+	}
+}
+
 // TestUpdateChatEphemeralSettings_IgnoresZeroTimestamp pins down the sparse-chunk
 // guard: a write with settingTimestamp == 0 carries no information about when
 // the user toggled the chat's ephemeral state, so it must not clobber a

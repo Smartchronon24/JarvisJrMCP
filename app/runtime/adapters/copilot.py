@@ -1,5 +1,10 @@
 from typing import Dict, List
-from app.runtime.contract import FrameworkAdapter, FrameworkIdentity, RuntimeConfig
+from app.runtime.contract import (
+    AdapterCapabilities,
+    FrameworkAdapter,
+    FrameworkIdentity,
+    RuntimeConfig,
+)
 
 class CopilotAdapter(FrameworkAdapter):
     """
@@ -9,6 +14,15 @@ class CopilotAdapter(FrameworkAdapter):
     
     def get_identity(self) -> FrameworkIdentity:
         return FrameworkIdentity.COPILOT
+
+    def get_capabilities(self) -> AdapterCapabilities:
+        return AdapterCapabilities(
+            supports_mcp=True,
+            supports_tool_calls=True,
+            supports_interactive_input=True,
+            supports_cancellation=True,
+            requires_authentication=True,
+        )
 
     def build_command(self, config: RuntimeConfig) -> List[str]:
         cmd = [config.executable_path]

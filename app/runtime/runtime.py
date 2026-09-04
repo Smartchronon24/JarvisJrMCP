@@ -37,8 +37,12 @@ from app.runtime.events import (
     ProcessCompletedEvent,
     ProcessFailedEvent,
     ProcessInterruptedEvent,
+    ToolCallStartedEvent,
+    ToolCallCompletedEvent,
     ErrorEvent,
 )
+
+RUNTIME_EVENT_PROTOCOL_VERSION = "1"
 
 
 class RuntimeExecutionState(Enum):
@@ -102,6 +106,7 @@ class RuntimeSessionEvent:
     def to_dict(self) -> dict:
         """Serialize to a dict suitable for WebSocket transport."""
         return {
+            "protocol_version": RUNTIME_EVENT_PROTOCOL_VERSION,
             "event_type": self.event_type,
             "run_id": self.run_id,
             "timestamp_ms": self.timestamp_ms,
@@ -261,6 +266,35 @@ class RuntimeSessionOrchestrator:
                 },
             )
             await self._emit_session_event(event)
+
+        elif isinstance(executor_event, ToolCallStartedEvent):
+            await self._emit_session_event(RuntimeSessionEvent(
+                event_type=executor_event.event_type.value,
+                run_id=self.run_id,
+                timestamp_ms=executor_event.timestamp_ms,
+                framework=self.framework_identity.value,
+                state=self.state_machine.current,
+                data={
+                    "tool_name": executor_event.tool_name,
+                    "call_id": executor_event.call_id,
+                    "arguments": executor_event.arguments,
+                },
+            ))
+
+        elif isinstance(executor_event, ToolCallCompletedEvent):
+            await self._emit_session_event(RuntimeSessionEvent(
+                event_type=executor_event.event_type.value,
+                run_id=self.run_id,
+                timestamp_ms=executor_event.timestamp_ms,
+                framework=self.framework_identity.value,
+                state=self.state_machine.current,
+                data={
+                    "tool_name": executor_event.tool_name,
+                    "call_id": executor_event.call_id,
+                    "result": executor_event.result,
+                    "is_error": executor_event.is_error,
+                },
+            ))
 
         elif isinstance(executor_event, InputRequiredEvent):
             self.metrics.input_required_count += 1

@@ -1,6 +1,11 @@
 from typing import Dict, List
 import json
-from app.runtime.contract import FrameworkAdapter, FrameworkIdentity, RuntimeConfig
+from app.runtime.contract import (
+    AdapterCapabilities,
+    FrameworkAdapter,
+    FrameworkIdentity,
+    RuntimeConfig,
+)
 
 class CodexAdapter(FrameworkAdapter):
     """
@@ -11,6 +16,17 @@ class CodexAdapter(FrameworkAdapter):
     
     def get_identity(self) -> FrameworkIdentity:
         return FrameworkIdentity.CODEX
+
+    def get_capabilities(self) -> AdapterCapabilities:
+        return AdapterCapabilities(
+            supports_mcp=True,
+            supports_tool_calls=True,
+            supports_interactive_input=True,
+            supports_cancellation=True,
+            requires_authentication=True,
+            experimental=True,
+            experimental_reason="Codex/Ollama MCP dispatch is not certified.",
+        )
 
     def build_command(self, config: RuntimeConfig) -> List[str]:
         # Always use the exec subcommand for single prompt runs

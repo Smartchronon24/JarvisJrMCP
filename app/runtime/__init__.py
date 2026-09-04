@@ -1,4 +1,9 @@
-from .contract import FrameworkIdentity, RuntimeConfig, FrameworkAdapter
+from .contract import (
+    AdapterCapabilities,
+    FrameworkIdentity,
+    RuntimeConfig,
+    FrameworkAdapter,
+)
 from .events import (
     EventType,
     RuntimeEvent,
@@ -25,6 +30,7 @@ from .server import RuntimeServer, FrameworkResolver, run_server
 
 __all__ = [
     "FrameworkIdentity",
+    "AdapterCapabilities",
     "RuntimeConfig",
     "FrameworkAdapter",
     "EventType",

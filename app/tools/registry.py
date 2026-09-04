@@ -53,7 +53,7 @@ from typing import Iterable, Union
 import re
 
 from app.tools.discovery import DiscoveryRequest, DiscoveryResult, DeterministicToolDiscovery
-from app.tools.models import ToolMetadata, ToolSnapshot
+from app.tools.models import ToolMetadata, ToolMetadataError, ToolSnapshot, guess_capability
 
 logger = logging.getLogger("jarvis.tool_registry")
 
@@ -78,7 +78,7 @@ _DEFAULT_CAPABILITY = "general"
 
 def _classify_server(server_name: str) -> str:
     """Return the capability bucket for a given server name."""
-    return _SERVER_CAPABILITY_MAP.get(server_name, _DEFAULT_CAPABILITY)
+    return guess_capability(server_name)
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -173,15 +173,23 @@ class ToolRegistry:
         Convenience method: build a ``ToolMetadata`` from a raw MCP tool
         object and register it.
         """
-        raw_name: str = mcp_tool.name  # type: ignore[attr-defined]
+        raw_name = getattr(mcp_tool, "name", None)
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ToolMetadataError("MCP tool name must be a non-empty string")
+        raw_name = raw_name.strip()
+        server_name = str(server_name).strip()
+        if not server_name:
+            raise ToolMetadataError("MCP server name must be a non-empty string")
         description: str = getattr(mcp_tool, "description", "") or ""
 
         # Preserve the raw schema verbatim
-        input_schema: dict = (
-            getattr(mcp_tool, "inputSchema", None)
-            or getattr(mcp_tool, "input_schema", None)
-            or {}
-        )
+        input_schema = getattr(mcp_tool, "inputSchema", None)
+        if input_schema is None:
+            input_schema = getattr(mcp_tool, "input_schema", None)
+        if input_schema is None:
+            input_schema = {}
+        if not isinstance(input_schema, dict):
+            raise ToolMetadataError("MCP tool input schema must be an object")
 
         scoped_name = f"{server_name}__{raw_name}"
         if capability is None:
